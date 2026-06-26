@@ -1,0 +1,428 @@
+= Greykor =
+
+{{CharacterInfobox
+| name        = Greykor
+| portrait    = https://foundry.atkennedy.com/modules/pf2e-tokens-characters/assets/portraits/gmg-guard-dwarf.webp?1779470174228
+| level       = 8
+| size        = Medium
+| hp          = 0/0
+| ac          = 25
+| perception  = +14
+| speed       = 25 ft.
+| fortitude   = +15
+| reflex      = +14
+| will        = +16
+| attributes  = '''STR''' +0 | '''DEX''' +4 | '''CON''' +3 | '''INT''' +3 | '''WIS''' +4 | '''CHA''' -1
+| key_ability  = STR
+| hero_points  = 1
+| languages   = elven, gnomish, goblin
+| wealth      = 96 GP, 2 SP
+| last_downed = Vewslog (2026-06-15)
+}}
+
+== Details ==
+* '''Ancestry:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/ancestries/dwarf.webp" width="20" height="20" alt="Dwarf" style="vertical-align:middle;" /></html> Dwarf
+* '''Heritage:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/ancestries/dromaar.webp" width="20" height="20" alt="Dromaar" style="vertical-align:middle;" /></html> Dromaar
+* '''Background:''' Bounty Hunter
+* '''Class:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/classes/inventor.webp" width="20" height="20" alt="Inventor" style="vertical-align:middle;" /></html> Inventor
+* '''Key Ability:''' STR
+* '''XP:''' 681
+* '''Hero Points:''' 1
+* '''Languages:''' elven, gnomish, goblin
+
+== Identity ==
+* '''Height:''' Short
+* '''Weight:''' Fat
+
+== Appearance ==
+Pale.
+
+== Biography ==
+Lorem fucking ipsum
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>⚔ Defense & Saves</b>
+<div class="mw-collapsible-content">
+* '''HP:''' 0/0
+* '''AC:''' 25
+* '''Perception:''' +14 ({{color|#2e8b57|'''Trained'''}})
+* '''Speed:''' 25 ft. (land)
+* '''Fortitude:''' +15 ({{color|#4682b4|'''Expert'''}})
+* '''Reflex:''' +14 ({{color|#2e8b57|'''Trained'''}})
+* '''Will:''' +16 ({{color|#4682b4|'''Expert'''}})
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>📊 Ability Scores</b>
+<div class="mw-collapsible-content">
+{| class="wikitable" style="text-align:center; width:100%;"
+|-
+! STR !! DEX !! CON !! INT !! WIS !! CHA
+|-
+| +0 || +4 || +3 || +3 || +4 || -1
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>🎓 Skills</b>
+<div class="mw-collapsible-content">
+{| class="wikitable sortable" style="width:100%;"
+! Skill !! Modifier !! Proficiency
+|-
+| Acrobatics || +18 || {{color|#8a2be2|'''Master'''}}
+|-
+| Arcana || +3 || {{color|#708090|'''Untrained'''}}
+|-
+| Athletics || +12 || {{color|#4682b4|'''Expert'''}}
+|-
+| Crafting || +17 || {{color|#8a2be2|'''Master'''}}
+|-
+| Deception || -1 || {{color|#708090|'''Untrained'''}}
+|-
+| Diplomacy || -1 || {{color|#708090|'''Untrained'''}}
+|-
+| Intimidation || -1 || {{color|#708090|'''Untrained'''}}
+|-
+| Legal || +3 || {{color|#708090|'''Untrained'''}}
+|-
+| Medicine || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Nature || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Occultism || +3 || {{color|#708090|'''Untrained'''}}
+|-
+| Performance || -1 || {{color|#708090|'''Untrained'''}}
+|-
+| Religion || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Society || +3 || {{color|#708090|'''Untrained'''}}
+|-
+| Stealth || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Survival || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Thievery || +4 || {{color|#708090|'''Untrained'''}}
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>💰 Wealth & Carry</b>
+<div class="mw-collapsible-content">
+{| class="wikitable"
+! Coin !! Total Value !! Bulk !! Invested
+|-
+| 96 GP, 2 SP || 96.2 gp || 124.7 / 5 enc / 10 max || 0/10
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>✨ Feats & Features</b>
+<div class="mw-collapsible-content">
+=====Heritage=====
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/ancestries/dromaar.webp" width="20" height="20" alt="Dromaar" style="vertical-align:middle;" /></html> '''Dromaar''' <small>(dromaar)</small>
+: Orcish strength emboldens your bloodline. You have a green tinge to your skin and other indicators of orc heritage. You gain the orc trait, the dromaar trait, and low-light vision. When you gain an ancestry feat, you can choose from dromaar and orc feats in addition to those from your ancestry.
+
+=====Background Features=====
+; '''Bounty Hunter'''
+: Bringing in lawbreakers lined your pockets. Maybe you had an altruistic motive and sought to bring in criminals to make the streets safer, or maybe the coin was motivation enough. Your techniques for hunting down criminals transfer easily to the life of an adventurer.
+
+Choose two attribute boosts. One must be to '''Strength''' or '''Wisdom''', and one is a free attribute boost.
+
+You're trained in the Survival skill and the Legal Lore skill. You gain the Experienced Tracker skill feat.
+
+=====Feats=====
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Battle Medicine" style="vertical-align:middle;" /></html> '''Battle Medicine''' <small>(general, healing, manipulate, skill)</small>
+: '''Requirements''' You're holding or wearing a healer's toolkit.
+
+You can patch up wounds, even in combat. Attempt a Medicine check with the same DC as for Treat Wounds and restore the corresponding amount of HP; this doesn't remove the wounded condition. As with Treat Wounds, you can attempt checks against higher DCs if you have the minimum proficiency rank. The target is then immune to your Battle Medicine for 1 day. This does not make them immune to, or otherwise count as, Treat Wounds.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/blunt-shot.webp" width="20" height="20" alt="Blunt Shot" style="vertical-align:middle;" /></html> '''Blunt Shot''' <small>(inventor)</small>
+: '''Ranged Only'''
+
+Your weapon innovation can file the edges off your ammunition and adjust the blunt force of the shot to deliver an attack that can batter as much as pierce, or even knock an opponent right off their feet. Your innovation gains the concussive and ranged trip traits.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/breakthrough-innovation.webp" width="20" height="20" alt="Breakthrough Innovation" style="vertical-align:middle;" /></html> '''Breakthrough Innovation''' <small>(inventor)</small>
+: You've made a breakthrough in your field of study and discovered a powerful new way to enhance your innovation. Choose a breakthrough modification of your innovation's type to apply to your innovation. You can choose an initial modification of your innovation's type instead if you prefer.
+
+==== Breakthrough Armor Modifications ====
+
+* '''Antimagic Plating''' Whether you used some clever adaptation of the magic-negating skymetal known as noqual or created magical protections of your own design, you've strengthened your armor against magic. While wearing the armor, you gain a +1 circumstance bonus to all saving throws against spells and to AC against spells. Against spells that target the armor directly (like heat metal), you instead gain a +4 circumstance bonus to all saving throws and to AC.
+* '''Camouflage Pigmentation (Subterfuge Suit Only)''' You've modified your armor's exterior to let you blend into your surroundings with ease, as long as you stay still. While wearing your armor, you can Hide even without cover or concealment, as the pigmentation shifts to match your surroundings.
+* '''Dense Plating''' You have encased your armor in robust plating. While wearing your armor, you gain resistance to slashing damage equal to half your level.
+* '''Enhanced Resistance''' You've improved upon your initial modification's ability to resist damage. The resistance from your initial armor modification adds your full level, instead of half your level (for instance, phlogistonic regulator's resistance would increase to your level). If you have more than one initial modification that gives resistance, choose which one this applies to.
+* '''Heavy Construction (Power Suit Only)''' You've expanded your innovation into a heavy bulwark, and your groundbreaking design ensures you don't take any of the drawbacks for such heavy defenses. Your innovation becomes heavy armor, and your proficiency in your innovation armor (but no other heavy armor) advances to be equal to your proficiency in medium armor. If your Strength modifier is at least +3, you remove the Speed penalty entirely instead of reducing it to –5 feet. The armor's adjusted statistics are: ''AC Bonus'' +5; ''Dex Cap'' +1; ''Check Penalty'' –2; ''Speed Penalty'' –10 feet; ''Strength'' +3; ''Bulk'' 3; ''Group'' composite; ''Armor Traits'' bulwark, entrench.
+* '''Hyper Boosters''' You've improved your speed boosters' power through a breakthrough that significantly increases the energy flow without risking exploding. You gain a +10-foot status bonus to your Speed, which increases to a +20-foot status bonus when you're in Overdrive. If you're legendary in Crafting, it instead increases to a +30-foot status bonus when you're in Overdrive. You must have the speed boosters modification to select this modification.
+* '''Layered Mesh''' You've woven an incredibly powerful network of interlocking mesh around your armor, which catches piercing attacks and diffuses them. While wearing your armor, you gain resistance to piercing damage equal to half your level.
+* '''Tensile Absorption''' You've enhanced the tensile capabilities of your armor, enabling it to bend with bludgeoning attacks. While wearing your armor, you gain resistance to bludgeoning damage equal to half your level.
+
+==== Breakthrough Construct Modifications ====
+
+* '''Advanced Weaponry''' You've powered up your construct's weaponry. Choose one of your construct's unarmed attacks to gain your choice of one initial weapon modification, chosen from the list on page 18 or from other initial weapon modifications to which you have access. The unarmed attack must meet any requirements for the chosen traits (such as being a melee attack for entangling form), and since it's an unarmed attack, it can never meet certain requirements, such as being a simple weapon for complex simplicity.
+* '''Antimagic Construction''' Whether you used some clever adaptation of the magic-negating skymetal known as noqual or created magical protections entirely of your own devising, you've made your innovation highly resilient to spells. Your construct innovation gains a +2 circumstance bonus to all saving throws and AC against spells.
+* '''Climbing Limbs''' With appendages that can claw or create suction, your construct becomes a capable climber. Your innovation gains a climb Speed equal to half its land Speed.
+* '''Durable Construction''' Your innovation is solidly built; it can take significant punishment before being destroyed. Increase its maximum HP by your level.
+* '''Marvelous Gears''' Your innovation gains expert proficiency in Intimidation, Stealth, and Survival. For any of these skills in which it was already an expert (because of being an advanced construct companion, for example), it gains master proficiency instead. If you have the revolutionary innovation class feature, these proficiencies improve to master, or legendary if your construct innovation was already an expert. You must have the wonder gears modification to select this modification.
+* '''Turret Configuration''' Your innovation can transform from a mobile construct to a stationary turret. Your construct companion can transform as a single action, which has the manipulate trait, turning into a turret in its space (or transforming back from a turret into its normal configuration). While it's a turret, your innovation is Immobilized, but the damage die from its projectile launcher increases to 1d6 and the range increment increases to 60 feet. You must have the projectile launcher modification to select this modification.
+
+==== Breakthrough Weapon Modifications ====
+
+* '''Advanced Rangefinder (Ranged Only)''' A carefully tuned scope or targeting device makes your weapon especially good at hitting weak points. Your innovation gains the backstabber trait and increases its range increment by 20 feet.
+* '''Aerodynamic Construction (Melee Only)''' You carefully engineer the shape of your weapon to maintain its momentum in attacks against successive targets. Your innovation gains the sweep trait and the versatile S trait.
+* '''Inconspicuous Appearance (Melee Only)''' Your innovation is built for easy concealment and surprise attacks. It gains the backstabber and versatile P traits. If the weapon has light Bulk, it also gains the concealable trait.
+* '''Integrated Gauntlet (One-Handed Weapon Only; Can't Have the Two-Hand Trait)''' Combining your weapon with a gauntlet, you make it so you can quickly switch between attacking with your weapon and tinkering using your hands. Your innovation gains the free-hand trait.
+* '''Manifold Alloy''' You've devised several alloys that contain useful properties of various metals, and you replace a number of parts of your weapon or its ammunition with pieces from these alloys. Your weapon innovation is cold iron and silver. This means you deal more damage to a variety of supernatural creatures, such as demons, devils, and fey.
+* '''Rope Shot (Ranged Only)''' Your weapon can shoot projectiles that split into simple ropes or nets around your foes' legs to trip your targets, and you can climb using the grappling hooks built into the weapon. Your weapon innovation gains the climbing and ranged trip traits, as well as the tethered trait if it is thrown.
+* '''Tangle Line (Thrown Only)''' Your weapon has an extensible line that you can use to knock your enemies over, recall the weapon to your hand and even parry attacks. Your innovation gains the parry, ranged trip and tethered traits.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/weapons/clan-dagger.webp" width="20" height="20" alt="Clan Dagger" style="vertical-align:middle;" /></html> '''Clan Dagger''' <small>(dwarf)</small>
+: You get one Clan Dagger of your clan for free, as it was given to you at birth. Selling this dagger is a terrible taboo and earns you the disdain of other dwarves.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Clockwork Celerity" style="vertical-align:middle;" /></html> '''Clockwork Celerity''' <small>(inventor, manipulate, unstable)</small>
+: '''Trigger''' Your turn begins.
+
+You can use unstable clockwork devices in your innovation to push your invention to act more quickly. You are Quickened for this turn. How you can use the extra action depends on your innovation.
+
+* '''Armor''' You can use the extra action to Step, Stride, or use another movement action granted by your innovation (such as Swim if you have the Diving Armor feat).
+* '''Construct''' You can use the extra action to Command your construct innovation (or to provide 1 of the actions if you spend 2 actions to Command your construct).
+* '''Weapon''' You can use the extra action to Strike with your innovation or Reload your innovation.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Experienced Tracker" style="vertical-align:middle;" /></html> '''Experienced Tracker''' <small>(general, skill)</small>
+: Tracking is second nature to you, and when necessary you can follow a trail without pause. You can Track while moving at full Speed by taking a –5 penalty to your Survival check. If you're a master in Survival, you don't take the –5 penalty. If you're legendary in Survival, you no longer need to roll a new Survival check every hour when tracking, though you still need to roll whenever there are significant changes in the trail.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/expert-overdrive.webp" width="20" height="20" alt="Expert Overdrive" style="vertical-align:middle;" /></html> '''Expert Overdrive''' <small>(inventor)</small>
+: You've increased your skill in crafting, and you can put your devices into a more powerful state of overdrive. You become an expert in Crafting, and on a successful use of Overdrive, you increase the additional damage by 1.
+; <html><img src="https://foundry.atkennedy.com/icons/magic/fire/explosion-mushroom-nuke-orange.webp" width="20" height="20" alt="Explode" style="vertical-align:middle;" /></html> '''Explode''' <small>(inventor)</small>
+: Your innovation is a creation barely held together by your own engineering, always on the edge of completely falling apart. Though this adds risk, it also means you can coax it to perform far beyond its design specifications using special unstable actions. See the definition of the unstable trait and how it affects your innovation.
+
+While inventors can learn various unstable actions over their career, all at least know how to make their innovation Explode.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Explosive Leap" style="vertical-align:middle;" /></html> '''Explosive Leap''' <small>(fire, inventor, move, unstable)</small>
+: You aim an explosion from your innovation downward to launch yourself into the air. You jump up to 30 feet in any direction without touching the ground. You must land on a space of solid ground, or else you fall after using your next action. As normal for effects where you fall after using your next action, you still fall at the end of your turn, even if you don't use any further actions that turn.
+
+'''Special''' If your innovation is a minion, it can take this action rather than you.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Fleet" style="vertical-align:middle;" /></html> '''Fleet''' <small>(general)</small>
+: You move more quickly on foot. Your Speed increases by 5 feet.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Incredible Initiative" style="vertical-align:middle;" /></html> '''Incredible Initiative''' <small>(general)</small>
+: You react more quickly than others can. You gain a +2 circumstance bonus to initiative rolls.
+; <html><img src="https://foundry.atkennedy.com/icons/commodities/tech/bulb.webp" width="20" height="20" alt="Innovation" style="vertical-align:middle;" /></html> '''Innovation''' <small>(inventor)</small>
+: While you're always creating inventions, there's one that represents your preeminent work, the one that you hope- with refinement-might change the world. Choose one of the below innovations. Your innovation's level is equal to your level. If your innovation is destroyed, you can spend 1 day of downtime and attempt a Crafting check with a high DC for your level; on a success, you rebuild it. An innovation only works due to your constant maintenance and tinkering, and therefore has no market Price.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Inventor" style="vertical-align:middle;" /></html> '''Inventor''' <small>(downtime, general, skill)</small>
+: You are a genius at Crafting, easily able to determine how things are made and create new inventions. You can spend downtime to invent a common formula that you don't know. This works just like the Craft activity: you spend half the Price of the formula up front, attempt a Crafting check, and on a success either finish the formula by paying the difference or work for longer to decrease the Price. The difference is that you spend the additional time in research, design, and development, rather than in creating an item. Once it's complete, you add the new formula you invented to your formula book.
+
+The GM might allow you to invent uncommon or rare formulas, typically with an increased DC. You need the Alchemical Crafting feat to invent alchemical formulas and the Magical Crafting feat to invent magical formulas.
+; <html><img src="https://foundry.atkennedy.com/icons/skills/melee/hand-grip-sword-red.webp" width="20" height="20" alt="Inventor Weapon Expertise" style="vertical-align:middle;" /></html> '''Inventor Weapon Expertise''' <small>(inventor)</small>
+: You develop tricks for using your weapons more effectively. Your proficiency ranks for simple and martial weapons and unarmed attacks increase to expert.
+
+If you have a Weapon Innovation, you gain access to the critical specialization effect with your innovation.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Kip Up" style="vertical-align:middle;" /></html> '''Kip Up''' <small>(general, skill)</small>
+: You stand up. This movement doesn't trigger reactions.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Magical Crafting" style="vertical-align:middle;" /></html> '''Magical Crafting''' <small>(general, skill)</small>
+: You can Craft magic items, though some have other requirements. When you select this feat, you gain formulas for four common magic items of 2nd level or lower.
+; <html><img src="https://foundry.atkennedy.com/icons/commodities/metal/ingot-hammered-silver.webp" width="20" height="20" alt="Manifold Alloy" style="vertical-align:middle;" /></html> '''Manifold Alloy''' <small>(inventor)</small>
+: You've devised several alloys that contain useful properties of various metals, and you replace a number of parts of your weapon or its ammunition with pieces from these alloys. Your weapon innovation is cold iron and silver. This means you deal more damage to a variety of supernatural creatures, such as demons, devils, and fey.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Manifold Modifications" style="vertical-align:middle;" /></html> '''Manifold Modifications''' <small>(inventor, modification)</small>
+: You've modified your innovation using clever workarounds, so you can include another initial modification without compromising its structure. Your innovation gains an additional initial modification from the list for innovations of its type.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/master-overdrive.webp" width="20" height="20" alt="Master Overdrive" style="vertical-align:middle;" /></html> '''Master Overdrive''' <small>(inventor)</small>
+: Your mastery of invention and crafting enhances your Overdrive even further. You become a master in Crafting, and on a successful Overdrive, you increase the additional damage by a total of 2, replacing the increase from expert overdrive.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Megaton Strike" style="vertical-align:middle;" /></html> '''Megaton Strike''' <small>(inventor)</small>
+: You activate gears, explosives, and other hidden mechanisms in your innovation to make a powerful attack. You make a Strike, dealing an extra die of weapon damage. If you're at least 10th level, increase this to two extra dice, and if you're at least 18th level, increase it to three extra dice. The type of Strike you can make depends on your innovation.
+
+* '''Armor''' You Strike with a melee unarmed attack or a melee weapon. To use a melee weapon for this, you must have prepared it in advance with special contraptions when you make your daily preparations.
+* '''Construct''' Your minion innovation Strikes.
+* '''Weapon''' You Strike with your weapon innovation.
+
+'''Unstable Function''' You put even more force into the Strike, though you risk stress fractures to your innovation. Add the unstable trait to Megaton Strike. The Strike deals another extra damage die, for a total of two extra dice at 4th level, three at 10th level, and four at 18th level.
+
+'''Special''' If your innovation is a minion, it can take this action rather than you.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Orc Sight" style="vertical-align:middle;" /></html> '''Orc Sight''' <small>(dromaar)</small>
+: Your orc blood grants you the keen vision of your forebears. You gain darkvision, allowing you to see in darkness and dim light just as well as you can in bright light. However, in darkness, you see in black and white only.
+
+'''Special''' You can take this feat only at 1st level, and you can't retrain out of this feat or into this feat.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/overdrive.webp" width="20" height="20" alt="Overdrive" style="vertical-align:middle;" /></html> '''Overdrive''' <small>(inventor)</small>
+: You have a bevy of smaller devices of your own invention, from muscle stimulants to concussive pistons. When it's necessary, you can throw them into Overdrive.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/peerless-inventor.webp" width="20" height="20" alt="Peerless Inventor" style="vertical-align:middle;" /></html> '''Peerless Inventor''' <small>(inventor)</small>
+: You are constantly inventing, and your skill at crafting is unimpeachable. You gain the Inventor skill feat, even if you don't meet its prerequisites.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Quick Repair" style="vertical-align:middle;" /></html> '''Quick Repair''' <small>(general, skill)</small>
+: For you, the Repair activity loses the exploration trait and takes 1 minute instead of 10 minutes. If you're a master in Crafting, it takes 3 actions. If you're legendary, it takes 1 action.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/reconfigure.webp" width="20" height="20" alt="Reconfigure" style="vertical-align:middle;" /></html> '''Reconfigure''' <small>(inventor)</small>
+: You've become an expert in all crafts and are always adjusting your inventions. You can attempt to change the modifications on your innovation by spending 1 day of downtime tinkering with it and attempting a Crafting check, with a high DC for your level. On a success, you can change one modification you've chosen for your innovation to a different modification of the same kind (initial, breakthrough, or revolutionary).
+
+If you have any modification feats, on a successful check you can choose to instead retrain a modification feat to a different modification feat. The new feat has to meet the standard restrictions for retraining.
+; <html><img src="https://foundry.atkennedy.com/icons/magic/symbols/symbol-lightning-bolt.webp" width="20" height="20" alt="Reflex Expertise" style="vertical-align:middle;" /></html> '''Reflex Expertise''' <small>(barbarian, bard, champion, cleric, druid, guardian, sorcerer, witch, wizard)</small>
+: You've developed a knack for dodging danger. Your proficiency rank for Reflex saves increases to expert.
+
+'''Guardian''' Even in the heaviest of armors, you can brace yourself against widespread effects. Your proficiency rank for Reflex saves increases to expert.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Scar-Thick Skin" style="vertical-align:middle;" /></html> '''Scar-Thick Skin''' <small>(orc)</small>
+: Glorious, storied scars cover and protect much of your body, girding you in fleshly armor that resists any wound weaker than those you have already survived. Your DC on flat checks to end persistent bleed damage is reduced from 15 to 10, or from 10 to a @Check[flat|dc:5] after receiving especially appropriate assistance.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Searing Restoration" style="vertical-align:middle;" /></html> '''Searing Restoration''' <small>(fire, healing, inventor, manipulate, unstable)</small>
+: They told you there was no way that explosions could heal people, but they were fools… Fools who didn't understand your brilliance! You create a minor explosion from your innovation, altering the combustion to cauterize wounds using vaporized medicinal herbs. You or a living creature adjacent to you regains @Damage[max(1,ceil(@actor.level/2))d10[healing]] Hit Points. In addition, the creature you heal can attempt an immediate flat check to recover from a single source of persistent bleed damage, with the DC reduction from appropriate assistance.
+
+At 3rd level, and every 2 levels thereafter, increase the healing by 1d10.
+
+'''Special''' If your innovation is a minion, it can take this action rather than you, though because it's not a living creature, it can't use the ability on itself.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/segmented-frame.webp" width="20" height="20" alt="Segmented Frame" style="vertical-align:middle;" /></html> '''Segmented Frame''' <small>(inventor)</small>
+: Hinges, clamps, and telescoping parts make your innovation collapsible and adjustable. It gains the modular trait for bludgeoning, piercing, and slashing. You can Interact to collapse the item down to light Bulk or to return it to your normal form. When it's collapsed to light Bulk, it has the concealable trait, which grants you a +2 circumstance bonus to Stealth checks and DCs to hide or conceal the weapon.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Shield Block" style="vertical-align:middle;" /></html> '''Shield Block''' <small>(general)</small>
+: '''Trigger''' While you have your shield raised, you would take physical damage (bludgeoning, piercing, or slashing) from an attack.
+
+You snap your shield in place to ward off a blow. Your shield prevents you from taking an amount of damage up to the shield's Hardness. You and the shield each take any remaining damage, possibly breaking or destroying the shield.
+; <html><img src="https://foundry.atkennedy.com/icons/equipment/shield/round-wooden-boss-gold-brown.webp" width="20" height="20" alt="Shield Block" style="vertical-align:middle;" /></html> '''Shield Block''' <small>(champion, commander, druid, exemplar, fighter, guardian, inventor)</small>
+: You gain the Shield Block general feat, a reaction that lets you reduce damage with your shield.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/weapon-innovation.webp" width="20" height="20" alt="Weapon Innovation" style="vertical-align:middle;" /></html> '''Weapon Innovation''' <small>(inventor)</small>
+: Your innovation is a complex and impossible-looking weapon augmented by numerous mechanisms. It begins with the same statistics as a level 0 common simple or martial weapon of your choice, or another level 0 simple or martial weapon to which you have access. You can instead use the statistics of a level 0 advanced weapon of your choice; you treat this as a martial weapon for the purposes of proficiency, but you do not gain an initial weapon modification.
+
+An innovation weapon can have fundamental and property runes added to it in the same way as an ordinary weapon. Because of the unique features of your innovation, everyone except you is untrained in it, even if they would normally be trained (or better) in simple or martial weapons.
+
+If you use the Overdrive action, you can choose to change the additional damage from Overdrive to fire damage.
+
+Choose one initial weapon modification to apply to your innovation, either from the following or from other initial weapon modifications to which you have access. These modifications grant additional weapon traits, sometimes with extra abilities.
+
+A modification might give your weapon the versatile trait with a damage type that the weapon could already deal, either from its base damage type or from an existing versatile trait. In that case, if you select that modification, you can instead choose to give the weapon the versatile trait for a different damage type: bludgeoning, piercing, or slashing.
+
+* '''Blunt Shot (ranged only):''' Your weapon innovation can file the edges off your ammunition and adjust the blunt force of the shot to deliver an attack that can batter as much as pierce, or even knock an opponent right off their feet. Your innovation gains the concussive and ranged trip traits.
+* '''Complex Simplicity (simple weapon only):''' Increase your innovation's weapon damage die by one step (d4 to d6, d6 to d8, d8 to d10, d10 to d12). In addition, it gains two of the following traits of your choice: versatile B, versatile P, versatile S, or razing.
+* '''Dynamic Weighting (one-handed melee weapon only; can't have the agile, attached, or free-hand trait):''' Your weapon is modified to be heavier and easier to manipulate or retrieve. Your innovation gains the two-hand trait, with a damage die one size higher than the weapon's normal weapon damage die size (for instance, a longsword would gain the two-hand d10 trait). Your innovation also gains the versatile B trait. If it was a thrown weapon, it gains the tethered trait.
+* '''Entangling Form (melee only):''' You've altered your weapon to including tangling wires or straps, or to have a flexible construction. Your innovation gains the disarm, grapple, and trip traits.
+* '''Hampering Spikes (melee only):''' You've added long, snagging spikes to your weapon, which you can use to impede your foes' movement. Your innovation gains the hampering, trip, and versatile P traits.
+* '''Hefty Composition (melee only):''' Blunt surfaces and sturdy construction make your weapon hefty and mace-like. Your innovation gains the shove, razing, and versatile B traits.
+* '''Modular Head:''' You've constructed a multi-purpose, adjustable striking surface for your weapon, or you've made special ammunition you can swiftly alter. Your innovation gains the modular trait for bludgeoning, piercing, and slashing. When you Interact to use the modular trait, you can also choose to give the weapon the nonlethal trait if it doesn't currently have it, or to remove that trait if it's currently nonlethal.
+* '''Pacification Tools (melee only):''' Softer materials make your weapon suited to knock out instead of kill, and special protrusions let you catch weapons and disarm your foes. Your innovation gains the disarm, hampering, and nonlethal traits. You can choose whether to apply the nonlethal trait on each attack with your innovation.
+* '''Razor Prongs (melee only):''' You can knock down and slash your foes with sharp, curved blades. Your innovation gains the tearing, trip, and versatile S traits.
+* 
+
+'''Segmented Frame:''' Hinges, clamps, and telescoping parts make your innovation collapsible and adjustable. It gains the modular trait for bludgeoning, piercing, and slashing. You can Interact to collapse the item down to light Bulk or to return it to your normal form. When it's collapsed to light Bulk, it has the concealable trait, which grants you a +2 circumstance bonus to Stealth checks and DCs to hide or conceal the weapon.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/weapon-specialization.webp" width="20" height="20" alt="Weapon Specialization" style="vertical-align:middle;" /></html> '''Weapon Specialization''' <small>(alchemist, animist, bard, champion, cleric, commander, druid, fighter, gunslinger, inventor, investigator, kineticist, ranger, rogue, sorcerer, summoner, swashbuckler, witch, wizard)</small>
+: You've learned how to inflict greater injuries with the weapons you know best. You deal an additional 2 damage with weapons and unarmed attacks in which you are an expert. This damage increases to 3 if you're a master, and 4 if you're legendary.
+
+=====Actions=====
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/actions/OneAction.webp" width="20" height="20" alt="Disarm" style="vertical-align:middle;" /></html> '''Disarm''' <small>(attack)</small>
+: '''Requirements''' You have at least one hand free. The target can't be more than one size larger than you.
+
+You try to knock an item out of a creature's grasp. Attempt an {Athletics} check against the target's Reflex DC.
+
+'''Critical Success''' You knock the item out of the target's grasp. It falls to the ground in the target's space.
+
+'''Success''' You weaken your target's grasp on the item. Further attempts to Disarm the target of that item gain a +2 circumstance bonus, and the target takes a –2 circumstance penalty to attacks with the item or other checks requiring a firm grasp on the item. The creature can end the effect by Interacting to change its grip on the item; otherwise, it lasts as long as the creature holds the item.
+
+Effect: Disarm (Success)
+
+'''Critical Failure''' You lose your balance and become Off-Guard until the start of your next turn.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/actions/TwoActions.webp" width="20" height="20" alt="Explode" style="vertical-align:middle;" /></html> '''Explode''' <small>(fire, inventor, manipulate, unstable)</small>
+: You intentionally take your innovation beyond normal safety limits, making it explode and damage nearby creatures without damaging the innovation... hopefully. The explosion deals @Damage[max(2, @actor.level)d6[@actor.flags.pf2e.inventor.explode]|options:area-damage] damage with a @Check[reflex|against:inventor|basic|options:area-effect] to all creatures in a @Template[emanation|distance:5] around you (if you're wearing or holding the innovation) or around your innovation (if your innovation is a minion).
+
+At 3rd level, and every level thereafter, increase your explosion's damage by 1d6.
+
+If you have the breakthrough innovation class feature, you can choose either a 5-foot or @Template[emanation|distance:10] for the area when you use Explode; if you have the revolutionary innovation class feature, you can choose a 5-foot, 10-foot, or @Template[emanation|distance:15].
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/actions/OneAction.webp" width="20" height="20" alt="Overdrive" style="vertical-align:middle;" /></html> '''Overdrive''' <small>(inventor, manipulate)</small>
+: '''Frequency''' once per round
+
+Temporarily cranking the gizmos on your body into overdrive, you try to add greater power to your attacks. Attempt a @Check[crafting|dc:@self.level] check that has a standard DC for your level.
+
+Effect: Overdrive
+
+'''Critical Success''' Your gizmos go into a state of incredible efficiency called critical overdrive, adding great power to your attacks. Your Strikes deal additional damage equal to your Intelligence modifier for 1 minute. After the Overdrive ends, your gizmos become unusable as they cool down or reset, and you can't use Overdrive for 1 minute.
+
+'''Success''' Your gizmos go into overdrive, adding power to your attacks. As critical success, except the additional damage is equal to half your Intelligence modifier.
+
+'''Failure''' Your gizmos whine concerningly and begin to smoke. Your Strikes deal 1 additional fire damage.
+
+'''Critical Failure''' Whoops! Something explodes. You take fire damage equal to half your level (rounded up), and you can't use Overdrive again for  rounds as your gizmos reset.
+
+'''Special''' When under the effects of Overdrive, you can still use the Overdrive action. You can't extend your Overdrive's duration this way, but you can turn an overdrive into a critical overdrive if you critically succeed. A failure has no effect on your current Overdrive, and you end your Overdrive on a critical failure.
+
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>🎒 Inventory</b>
+<div class="mw-collapsible-content">
+=====Weapons=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/guns/rifle-brown.webp" width="24" height="24" alt="Jezail" style="vertical-align:middle;" /></html> || [[Jezail]] || 1 || 1 || 1 || 11 gp
+|}
+
+=====Armor & Shields=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/chest/breastplate-scale-leather.webp" width="24" height="24" alt="Leather Lamellar" style="vertical-align:middle;" /></html> || [[Leather Lamellar]] || 1 || 1 || 0 || 3 gp
+|}
+
+=====Consumables=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/consumables/potions/bottle-round-corked-orante-red.webp" width="24" height="24" alt="Healing Potion (Lesser)" style="vertical-align:middle;" /></html> || [[Healing Potion (Lesser)]] || 3 || 0.1 || 3 || 12 gp
+|}
+
+=====Ammunition=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-lead.webp" width="24" height="24" alt="Rounds (Jezail)" style="vertical-align:middle;" /></html> || [[Rounds (Jezail)]] || 31 || 0.1 || 0 || 1 sp
+|}
+
+=====Equipment=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/chest/breastplate-purple.webp" width="24" height="24" alt="Clothing (Fine)" style="vertical-align:middle;" /></html> || [[Clothing (Fine)]] || 1 || 0.1 || 0 || 2 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/tools/scribal/lens-blue.webp" width="24" height="24" alt="Crafter's Eyepiece" style="vertical-align:middle;" /></html> || [[Crafter's Eyepiece]] || 1 || 0 || 3 || 60 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/hand/glove-simple-cloth-white.webp" width="24" height="24" alt="Healer's Gloves" style="vertical-align:middle;" /></html> || [[Healer's Gloves]] || 1 || 0.1 || 4 || 80 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/waist/belt-leather-brown.webp" width="24" height="24" alt="Lifting Belt" style="vertical-align:middle;" /></html> || [[Lifting Belt]] || 1 || 0.1 || 4 || 80 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/finger/ring-crown-dragon-green.webp" width="24" height="24" alt="Ring of the Ram" style="vertical-align:middle;" /></html> || [[Ring of the Ram]] || 1 || 0 || 6 || 220 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/head/helm-barbute-rounded-orange.webp" width="24" height="24" alt="Thunder Helm" style="vertical-align:middle;" /></html> || [[Thunder Helm]] || 1 || 0.1 || 5 || 160 gp
+|}
+
+=====Bags & Storage=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/held-items/bag-of-holding.webp" width="24" height="24" alt="Spacious Pouch (Type I)" style="vertical-align:middle;" /></html> || [[Spacious Pouch (Type I)]] || 1 || 1 || 4 || 75 gp
+|-
+| colspan="6" |
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/consumables/other-consumables/skull-bomb.webp" width="16" height="16" alt="Skull Bomb" style="vertical-align:middle;" /></html> Skull Bomb
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/adventuring-gear/rations.webp" width="16" height="16" alt="Rations" style="vertical-align:middle;" /></html> Rations ×2
+* <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-lead.webp" width="16" height="16" alt="Rounds (Arquebus)" style="vertical-align:middle;" /></html> Rounds (Arquebus) ×30
+* <html><img src="https://foundry.atkennedy.com/icons/commodities/stone/geode-raw-tan.webp" width="16" height="16" alt="Flint and Steel" style="vertical-align:middle;" /></html> Flint and Steel
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/alchemical-items/alchemical-bombs/bottled-lightning.webp" width="16" height="16" alt="Bottled Lightning (Moderate)" style="vertical-align:middle;" /></html> Bottled Lightning (Moderate)
+* <html><img src="https://foundry.atkennedy.com/icons/containers/bags/pouch-gold-green.webp" width="16" height="16" alt="Healer's Toolkit" style="vertical-align:middle;" /></html> Healer's Toolkit ×4
+* <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-rounded-red.webp" width="16" height="16" alt="Jessie's Journal" style="vertical-align:middle;" /></html> Jessie's Journal
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/adventuring-gear/chalk.webp" width="16" height="16" alt="Chalk" style="vertical-align:middle;" /></html> Chalk ×10
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/alchemical-items/alchemical-bombs/acid-flask.webp" width="16" height="16" alt="Acid Flask (Moderate)" style="vertical-align:middle;" /></html> Acid Flask (Moderate)
+* <html><img src="https://foundry.atkennedy.com/icons/tools/smithing/anvil.webp" width="16" height="16" alt="Repair Toolkit" style="vertical-align:middle;" /></html> Repair Toolkit ×2
+* <html><img src="https://foundry.atkennedy.com/icons/sundries/survival/rope-wrapped-brown.webp" width="16" height="16" alt="Rope" style="vertical-align:middle;" /></html> Rope
+* <html><img src="https://foundry.atkennedy.com/icons/sundries/lights/torch-brown.webp" width="16" height="16" alt="Torch" style="vertical-align:middle;" /></html> Torch ×5
+* <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-lead.webp" width="16" height="16" alt="Rounds (Dueling Pistol)" style="vertical-align:middle;" /></html> Rounds (Dueling Pistol) ×67
+* <html><img src="https://foundry.atkennedy.com/icons/containers/ammunition/quiver-simple-brown.webp" width="16" height="16" alt="Bedroll" style="vertical-align:middle;" /></html> Bedroll
+* <html><img src="https://foundry.atkennedy.com/icons/sundries/survival/soap.webp" width="16" height="16" alt="Soap" style="vertical-align:middle;" /></html> Soap
+* <html><img src="https://foundry.atkennedy.com/icons/equipment/chest/breastplate-purple.webp" width="16" height="16" alt="Clothing (Fine)" style="vertical-align:middle;" /></html> Clothing (Fine)
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/adventuring-gear/waterskin.webp" width="16" height="16" alt="Waterskin" style="vertical-align:middle;" /></html> Waterskin
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/weapons/clan-dagger.webp" width="16" height="16" alt="Clan Dagger" style="vertical-align:middle;" /></html> Clan Dagger
+* <html><img src="https://foundry.atkennedy.com/icons/consumables/potions/bottle-round-corked-orante-red.webp" width="16" height="16" alt="Healing Potion (Lesser)" style="vertical-align:middle;" /></html> Healing Potion (Lesser)
+* <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-lead.webp" width="16" height="16" alt="Rounds (Clan Pistol)" style="vertical-align:middle;" /></html> Rounds (Clan Pistol) ×12
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/weapons/longsword.webp" width="16" height="16" alt="Longsword" style="vertical-align:middle;" /></html> Longsword
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/alchemical-items/alchemical-poisons/lich-dust.webp" width="16" height="16" alt="Lich Dust" style="vertical-align:middle;" /></html> Lich Dust
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/consumables/oils/oil-of-potency.webp" width="16" height="16" alt="Oil of Potency" style="vertical-align:middle;" /></html> Oil of Potency ×2
+* <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/held-items/ignitor.webp" width="16" height="16" alt="Ignitor" style="vertical-align:middle;" /></html> Ignitor
+* <html><img src="https://foundry.atkennedy.com/icons/consumables/potions/bottle-round-ring-teal.webp" width="16" height="16" alt="Invisibility Potion" style="vertical-align:middle;" /></html> Invisibility Potion
+|}
+
+=====Treasure & Currency=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/treasure/currency/gold-pieces.webp" width="24" height="24" alt="Gold Pieces" style="vertical-align:middle;" /></html> || [[Gold Pieces]] || 96 || 1 || 0 || 1 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/treasure/currency/silver-pieces.webp" width="24" height="24" alt="Silver Pieces" style="vertical-align:middle;" /></html> || [[Silver Pieces]] || 2 || 1 || 0 || 1 sp
+|}
+
+</div>
+</div>
+
+''Last synced: 2026-06-20 01:33''
+[[Category:Characters]]

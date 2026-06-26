@@ -1,0 +1,32 @@
+2026/06/10-10:11:50.491706 7fad1effd6c0 Recovering log #294
+2026/06/10-10:11:50.500973 7fad1effd6c0 Level-0 table #296: started
+2026/06/10-10:11:50.515604 7fad1effd6c0 Level-0 table #296: 1287067 bytes OK
+2026/06/10-10:11:50.518477 7fad1effd6c0 Delete type=0 #294
+2026/06/10-10:11:50.519464 7fad1effd6c0 Delete type=3 #293
+2026/06/10-10:11:51.147247 7fad1d7fa6c0 Moved #296 to level-1 1287067 bytes OK: files[ 0 1 8 0 0 0 0 ]
+2026/06/10-10:15:03.834086 7fad1d7fa6c0 Compacting 1@1 + 8@2 files
+2026/06/10-10:15:03.860331 7fad1d7fa6c0 Generated table #298@1: 763 keys, 2119668 bytes
+2026/06/10-10:15:03.886942 7fad1d7fa6c0 Generated table #299@1: 780 keys, 2118099 bytes
+2026/06/10-10:15:03.911547 7fad1d7fa6c0 Generated table #300@1: 744 keys, 2118573 bytes
+2026/06/10-10:15:03.936087 7fad1d7fa6c0 Generated table #301@1: 755 keys, 2120464 bytes
+2026/06/10-10:15:03.959100 7fad1d7fa6c0 Generated table #302@1: 767 keys, 2123592 bytes
+2026/06/10-10:15:03.982536 7fad1d7fa6c0 Generated table #303@1: 802 keys, 2120081 bytes
+2026/06/10-10:15:04.009652 7fad1d7fa6c0 Generated table #304@1: 734 keys, 2123458 bytes
+2026/06/10-10:15:04.035443 7fad1d7fa6c0 Generated table #305@1: 795 keys, 2121371 bytes
+2026/06/10-10:15:04.038884 7fad1d7fa6c0 Generated table #306@1: 35 keys, 86947 bytes
+2026/06/10-10:15:04.038917 7fad1d7fa6c0 Compacted 1@1 + 8@2 files => 17052253 bytes
+2026/06/10-10:15:04.040398 7fad1d7fa6c0 compacted to: files[ 0 0 9 0 0 0 0 ]
+2026/06/10-10:15:04.041188 7fad1d7fa6c0 Delete type=2 #276
+2026/06/10-10:15:04.041868 7fad1d7fa6c0 Delete type=2 #278
+2026/06/10-10:15:04.043303 7fad1d7fa6c0 Delete type=2 #281
+2026/06/10-10:15:04.043694 7fad1d7fa6c0 Delete type=2 #279
+2026/06/10-10:15:04.044117 7fad1d7fa6c0 Delete type=2 #277
+2026/06/10-10:15:04.044593 7fad1d7fa6c0 Delete type=2 #275
+2026/06/10-10:15:04.045042 7fad1d7fa6c0 Delete type=2 #274
+2026/06/10-10:15:04.045421 7fad1d7fa6c0 Delete type=2 #296
+2026/06/10-10:15:04.045869 7fad1d7fa6c0 Delete type=2 #290
+2026/06/10-10:28:32.462328 7fad1d7fa6c0 Level-0 table #308: started
+2026/06/10-10:28:32.462527 7fad1d7fa6c0 Level-0 table #308: 0 bytes OK
+2026/06/10-10:28:32.463803 7fad1d7fa6c0 Delete type=0 #297
+2026/06/10-10:28:32.463925 7fad1d7fa6c0 Manual compaction at level-0 from '!messages!00r5FeieVySSej6S' @ 72057594037927935 : 1 .. '!messages!zzxKbCjCWrroQlxo' @ 0 : 0; will stop at (end)
+2026/06/10-10:28:32.463973 7fad1d7fa6c0 Manual compaction at level-1 from '!messages!00r5FeieVySSej6S' @ 72057594037927935 : 1 .. '!messages!zzxKbCjCWrroQlxo' @ 0 : 0; will stop at (end)

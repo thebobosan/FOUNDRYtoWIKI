@@ -1,0 +1,26 @@
+2026/06/10-10:11:50.776371 7fad1dffb6c0 Recovering log #309
+2026/06/10-10:11:50.784054 7fad1dffb6c0 Level-0 table #311: started
+2026/06/10-10:11:50.790524 7fad1dffb6c0 Level-0 table #311: 580406 bytes OK
+2026/06/10-10:11:50.794233 7fad1dffb6c0 Delete type=3 #308
+2026/06/10-10:11:50.794309 7fad1dffb6c0 Delete type=0 #309
+2026/06/10-10:11:51.650620 7fad1d7fa6c0 Moved #311 to level-1 580406 bytes OK: files[ 0 1 2 0 0 0 0 ]
+2026/06/10-10:11:51.653763 7fad1d7fa6c0 Compacting 1@1 + 1@2 files
+2026/06/10-10:11:51.675861 7fad1d7fa6c0 Generated table #313@1: 6128 keys, 2140532 bytes
+2026/06/10-10:11:51.678148 7fad1d7fa6c0 Generated table #314@1: 102 keys, 7139 bytes
+2026/06/10-10:11:51.678168 7fad1d7fa6c0 Compacted 1@1 + 1@2 files => 2147671 bytes
+2026/06/10-10:11:51.679593 7fad1d7fa6c0 compacted to: files[ 0 0 3 0 0 0 0 ]
+2026/06/10-10:11:51.679757 7fad1d7fa6c0 Delete type=2 #311
+2026/06/10-10:11:51.680247 7fad1d7fa6c0 Delete type=2 #303
+2026/06/10-10:28:32.507785 7fad1d7fa6c0 Level-0 table #316: started
+2026/06/10-10:28:32.509358 7fad1d7fa6c0 Level-0 table #316: 4107 bytes OK
+2026/06/10-10:28:32.510757 7fad1d7fa6c0 Delete type=0 #312
+2026/06/10-10:28:32.513713 7fad1d7fa6c0 Manual compaction at level-0 from '!scenes!0jnKv8tuYvSmgMMB' @ 72057594037927935 : 1 .. '!scenes.walls!ykAYkScq2wnBEaO1.zj6uyDpw5WXHuMSE' @ 0 : 0; will stop at (end)
+2026/06/10-10:28:32.513771 7fad1d7fa6c0 Manual compaction at level-1 from '!scenes!0jnKv8tuYvSmgMMB' @ 72057594037927935 : 1 .. '!scenes.walls!ykAYkScq2wnBEaO1.zj6uyDpw5WXHuMSE' @ 0 : 0; will stop at '!scenes.tokens.delta.items!cdr5X4eWphoDApkO.JoWVTA0PD7AQtQVi.JoWVTA0PD7AQtQVi.VdHYEEumf6xUWG4I' @ 72234 : 1
+2026/06/10-10:28:32.513774 7fad1d7fa6c0 Compacting 1@1 + 1@2 files
+2026/06/10-10:28:32.533132 7fad1d7fa6c0 Generated table #317@1: 6097 keys, 2140467 bytes
+2026/06/10-10:28:32.534519 7fad1d7fa6c0 Generated table #318@1: 34 keys, 2382 bytes
+2026/06/10-10:28:32.534536 7fad1d7fa6c0 Compacted 1@1 + 1@2 files => 2142849 bytes
+2026/06/10-10:28:32.535584 7fad1d7fa6c0 compacted to: files[ 0 0 4 0 0 0 0 ]
+2026/06/10-10:28:32.535891 7fad1d7fa6c0 Delete type=2 #313
+2026/06/10-10:28:32.536297 7fad1d7fa6c0 Delete type=2 #316
+2026/06/10-10:28:32.544378 7fad1d7fa6c0 Manual compaction at level-1 from '!scenes.tokens.delta.items!cdr5X4eWphoDApkO.JoWVTA0PD7AQtQVi.JoWVTA0PD7AQtQVi.VdHYEEumf6xUWG4I' @ 72234 : 1 .. '!scenes.walls!ykAYkScq2wnBEaO1.zj6uyDpw5WXHuMSE' @ 0 : 0; will stop at (end)

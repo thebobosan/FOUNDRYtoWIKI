@@ -1,0 +1,30 @@
+2026/06/15-18:18:44.689210 7f1bc11fd6c0 Recovering log #307
+2026/06/15-18:18:44.694237 7f1bc11fd6c0 Delete type=0 #307
+2026/06/15-18:18:44.694326 7f1bc11fd6c0 Delete type=3 #295
+2026/06/15-19:51:28.208519 7f1923fff6c0 Level-0 table #312: started
+2026/06/15-19:51:28.214337 7f1923fff6c0 Level-0 table #312: 71302 bytes OK
+2026/06/15-19:51:28.218983 7f1923fff6c0 Delete type=0 #310
+2026/06/15-19:51:28.227455 7f1923fff6c0 Manual compaction at level-0 from '!messages!00r5FeieVySSej6S' @ 72057594037927935 : 1 .. '!messages!zzxKbCjCWrroQlxo' @ 0 : 0; will stop at (end)
+2026/06/15-19:51:28.231025 7f1923fff6c0 Manual compaction at level-1 from '!messages!00r5FeieVySSej6S' @ 72057594037927935 : 1 .. '!messages!zzxKbCjCWrroQlxo' @ 0 : 0; will stop at '!messages!ymMgFG3EPxUwjsL5' @ 24028 : 1
+2026/06/15-19:51:28.231034 7f1923fff6c0 Compacting 1@1 + 8@2 files
+2026/06/15-19:51:28.260873 7f1923fff6c0 Generated table #313@1: 763 keys, 2119029 bytes
+2026/06/15-19:51:28.284618 7f1923fff6c0 Generated table #314@1: 776 keys, 2121198 bytes
+2026/06/15-19:51:28.308356 7f1923fff6c0 Generated table #315@1: 750 keys, 2122108 bytes
+2026/06/15-19:51:28.332177 7f1923fff6c0 Generated table #316@1: 754 keys, 2118688 bytes
+2026/06/15-19:51:28.359290 7f1923fff6c0 Generated table #317@1: 760 keys, 2117457 bytes
+2026/06/15-19:51:28.383246 7f1923fff6c0 Generated table #318@1: 806 keys, 2122858 bytes
+2026/06/15-19:51:28.407061 7f1923fff6c0 Generated table #319@1: 732 keys, 2118772 bytes
+2026/06/15-19:51:28.429735 7f1923fff6c0 Generated table #320@1: 796 keys, 2122877 bytes
+2026/06/15-19:51:28.434451 7f1923fff6c0 Generated table #321@1: 26 keys, 73959 bytes
+2026/06/15-19:51:28.434472 7f1923fff6c0 Compacted 1@1 + 8@2 files => 17036946 bytes
+2026/06/15-19:51:28.435635 7f1923fff6c0 compacted to: files[ 0 0 10 0 0 0 0 ]
+2026/06/15-19:51:28.435924 7f1923fff6c0 Delete type=2 #299
+2026/06/15-19:51:28.436346 7f1923fff6c0 Delete type=2 #301
+2026/06/15-19:51:28.436645 7f1923fff6c0 Delete type=2 #304
+2026/06/15-19:51:28.436970 7f1923fff6c0 Delete type=2 #302
+2026/06/15-19:51:28.437251 7f1923fff6c0 Delete type=2 #312
+2026/06/15-19:51:28.437514 7f1923fff6c0 Delete type=2 #298
+2026/06/15-19:51:28.437854 7f1923fff6c0 Delete type=2 #300
+2026/06/15-19:51:28.438141 7f1923fff6c0 Delete type=2 #303
+2026/06/15-19:51:28.438432 7f1923fff6c0 Delete type=2 #305
+2026/06/15-19:51:28.445573 7f1923fff6c0 Manual compaction at level-1 from '!messages!ymMgFG3EPxUwjsL5' @ 24028 : 1 .. '!messages!zzxKbCjCWrroQlxo' @ 0 : 0; will stop at (end)

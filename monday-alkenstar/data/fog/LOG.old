@@ -1,0 +1,24 @@
+2026/06/10-10:11:50.632988 7fad1f7fe6c0 Recovering log #313
+2026/06/10-10:11:50.644889 7fad1f7fe6c0 Level-0 table #315: started
+2026/06/10-10:11:50.655942 7fad1f7fe6c0 Level-0 table #315: 1241829 bytes OK
+2026/06/10-10:11:50.659446 7fad1f7fe6c0 Delete type=3 #312
+2026/06/10-10:11:50.659532 7fad1f7fe6c0 Delete type=0 #313
+2026/06/10-10:15:26.637820 7fad1d7fa6c0 Moved #315 to level-1 1241829 bytes OK: files[ 0 1 5 0 0 0 0 ]
+2026/06/10-10:28:32.542431 7fad1d7fa6c0 Level-0 table #318: started
+2026/06/10-10:28:32.542640 7fad1d7fa6c0 Level-0 table #318: 0 bytes OK
+2026/06/10-10:28:32.544305 7fad1d7fa6c0 Delete type=0 #316
+2026/06/10-10:28:32.553053 7fad1d7fa6c0 Manual compaction at level-0 from '!fog!0DtLAY8IziAsdh0j' @ 72057594037927935 : 1 .. '!fog!zLwVTorCLs7gZLK7' @ 0 : 0; will stop at (end)
+2026/06/10-10:28:32.553134 7fad1d7fa6c0 Manual compaction at level-1 from '!fog!0DtLAY8IziAsdh0j' @ 72057594037927935 : 1 .. '!fog!zLwVTorCLs7gZLK7' @ 0 : 0; will stop at '!fog!wO3ASBjIuCmBY1XG' @ 1494 : 1
+2026/06/10-10:28:32.553138 7fad1d7fa6c0 Compacting 1@1 + 4@2 files
+2026/06/10-10:28:32.574798 7fad1d7fa6c0 Generated table #319@1: 30 keys, 2240732 bytes
+2026/06/10-10:28:32.592053 7fad1d7fa6c0 Generated table #320@1: 39 keys, 2189002 bytes
+2026/06/10-10:28:32.610706 7fad1d7fa6c0 Generated table #321@1: 35 keys, 2113054 bytes
+2026/06/10-10:28:32.622130 7fad1d7fa6c0 Generated table #322@1: 30 keys, 1157411 bytes
+2026/06/10-10:28:32.622159 7fad1d7fa6c0 Compacted 1@1 + 4@2 files => 7700199 bytes
+2026/06/10-10:28:32.623075 7fad1d7fa6c0 compacted to: files[ 0 0 5 0 0 0 0 ]
+2026/06/10-10:28:32.623372 7fad1d7fa6c0 Delete type=2 #307
+2026/06/10-10:28:32.623841 7fad1d7fa6c0 Delete type=2 #306
+2026/06/10-10:28:32.624158 7fad1d7fa6c0 Delete type=2 #309
+2026/06/10-10:28:32.624441 7fad1d7fa6c0 Delete type=2 #308
+2026/06/10-10:28:32.624822 7fad1d7fa6c0 Delete type=2 #315
+2026/06/10-10:28:32.632146 7fad1d7fa6c0 Manual compaction at level-1 from '!fog!wO3ASBjIuCmBY1XG' @ 1494 : 1 .. '!fog!zLwVTorCLs7gZLK7' @ 0 : 0; will stop at (end)

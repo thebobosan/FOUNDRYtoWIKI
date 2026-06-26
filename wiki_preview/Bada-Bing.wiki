@@ -1,0 +1,315 @@
+= Bada-Bing =
+
+{{CharacterInfobox
+| name        = Bada-Bing
+| portrait    = https://foundry.atkennedy.com/modules/pf2e-tokens-characters/assets/portraits/pc-goblin-witch.webp?1779470016345
+| level       = 8
+| size        = Medium
+| hp          = 0/0
+| ac          = 25
+| perception  = +13
+| speed       = 25 ft.
+| fortitude   = +13
+| reflex      = +16
+| will        = +13
+| attributes  = '''STR''' +0 | '''DEX''' +4 | '''CON''' +3 | '''INT''' +0 | '''WIS''' +1 | '''CHA''' +4
+| key_ability  = STR
+| gender       = Male
+| hero_points  = 0
+| wealth      = 68 GP, 8 SP
+}}
+
+== Details ==
+* '''Ancestry:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/ancestries/goblin.webp" width="20" height="20" alt="Goblin" style="vertical-align:middle;" /></html> Goblin
+* '''Heritage:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/ancestry/unbreakable-goblin.webp" width="20" height="20" alt="Unbreakable Goblin" style="vertical-align:middle;" /></html> Unbreakable Goblin
+* '''Background:''' Gambler
+* '''Class:''' <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/classes/rogue.webp" width="20" height="20" alt="Rogue" style="vertical-align:middle;" /></html> Rogue
+* '''Key Ability:''' STR
+* '''XP:''' 761
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>⚔ Defense & Saves</b>
+<div class="mw-collapsible-content">
+* '''HP:''' 0/0
+* '''AC:''' 25
+* '''Perception:''' +13 ({{color|#4682b4|'''Expert'''}})
+* '''Speed:''' 25 ft. (land)
+* '''Fortitude:''' +13 ({{color|#2e8b57|'''Trained'''}})
+* '''Reflex:''' +16 ({{color|#4682b4|'''Expert'''}})
+* '''Will:''' +13 ({{color|#4682b4|'''Expert'''}})
+* '''Active Conditions:''' Dying 4, Blinded, Unconscious, Prone
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>📊 Ability Scores</b>
+<div class="mw-collapsible-content">
+{| class="wikitable" style="text-align:center; width:100%;"
+|-
+! STR !! DEX !! CON !! INT !! WIS !! CHA
+|-
+| +0 || +4 || +3 || +0 || +1 || +4
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>🎓 Skills</b>
+<div class="mw-collapsible-content">
+{| class="wikitable sortable" style="width:100%;"
+! Skill !! Modifier !! Proficiency
+|-
+| Acrobatics || +14 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Arcana || +0 || {{color|#708090|'''Untrained'''}}
+|-
+| Athletics || +10 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Crafting || +0 || {{color|#708090|'''Untrained'''}}
+|-
+| Deception || +16 || {{color|#4682b4|'''Expert'''}}
+|-
+| Diplomacy || +16 || {{color|#4682b4|'''Expert'''}}
+|-
+| Intimidation || +18 || {{color|#8a2be2|'''Master'''}}
+|-
+| Medicine || +1 || {{color|#708090|'''Untrained'''}}
+|-
+| Nature || +1 || {{color|#708090|'''Untrained'''}}
+|-
+| Occultism || +10 || {{color|#2e8b57|'''Trained'''}}
+|-
+| Performance || +18 || {{color|#8a2be2|'''Master'''}}
+|-
+| Religion || +1 || {{color|#708090|'''Untrained'''}}
+|-
+| Society || +12 || {{color|#4682b4|'''Expert'''}}
+|-
+| Stealth || +16 || {{color|#4682b4|'''Expert'''}}
+|-
+| Survival || +1 || {{color|#708090|'''Untrained'''}}
+|-
+| Thievery || +14 || {{color|#2e8b57|'''Trained'''}}
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>💰 Wealth & Carry</b>
+<div class="mw-collapsible-content">
+{| class="wikitable"
+! Coin !! Total Value !! Bulk !! Invested
+|-
+| 68 GP, 8 SP || 68.8 gp || 83.7 / 5 enc / 10 max || 0/10
+|}
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>✨ Feats & Features</b>
+<div class="mw-collapsible-content">
+=====Heritage=====
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/ancestry/unbreakable-goblin.webp" width="20" height="20" alt="Unbreakable Goblin" style="vertical-align:middle;" /></html> '''Unbreakable Goblin'''
+: You're able to bounce back from injuries easily due to an exceptionally thick skull, cartilaginous bones, or some other mixed blessing. You gain 10 Hit Points from your ancestry instead of 6. When you fall, reduce the falling damage you take as though you had fallen half the distance.
+
+=====Background Features=====
+; '''Gambler'''
+: The thrill of the win drew you into games of chance. This might have been a lucrative sideline that paled in comparison to the real risks of adventuring, or you might have fallen on hard times due to your gambling and pursued adventuring as a way out of a spiral.
+
+Choose two attribute boosts. One must be to '''Dexterity''' or '''Charisma''', and one is a free attribute boost.
+
+You're trained in the Deception skill and the Games Lore skill. You gain the Lie to Me skill feat.
+
+=====Feats=====
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Assurance (Performance)" style="vertical-align:middle;" /></html> '''Assurance (Performance)''' <small>(fortune, general, skill)</small>
+: Even in the worst circumstances, you can perform basic tasks. Choose a skill you're trained in. You can forgo rolling a skill check for that skill to instead receive a result of 10 + your proficiency bonus (do not apply any other bonuses, penalties, or modifiers).
+
+'''Special''' You can select this feat multiple times. Each time, choose a different skill and gain the benefits for that skill.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Battle Cry" style="vertical-align:middle;" /></html> '''Battle Cry''' <small>(general, skill)</small>
+: When you roll initiative, you can yell a mighty battle cry and Demoralize an observed foe as a free action. If you're legendary in Intimidation, you can use a reaction to Demoralize your foe when you critically succeed at an attack roll.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Blind-Fight" style="vertical-align:middle;" /></html> '''Blind-Fight''' <small>(fighter, investigator, ranger, rogue)</small>
+: '''Fighter, Rogue, Investigator''' Your battle instincts make you more aware of Concealed and Invisible opponents.
+
+'''Ranger''' Your heightened senses allow you to instinctively detect unseen opponents.
+
+You don't need to succeed at a flat check to target concealed creatures. You're not Off-Guard to creatures that are Hidden from you (unless you're off-guard to them for reasons other than the hidden condition), and you need only a successful @Check[flat|showDC:all|dc:5] to target a hidden creature.
+
+While you're adjacent to an Undetected creature of your level or lower, it is instead only hidden from you.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Dazzling Bullet" style="vertical-align:middle;" /></html> '''Dazzling Bullet''' <small>(archetype, flourish)</small>
+: Your tricks discombobulate your opponent, leaving spots in their vision from the bright flash of your gunshot reflected straight into their eyes (or other visual organs). Attempt a @Check[performance|defense:will] check against the target creature's Will DC and make a ranged firearm Strike against that target. If the Strike deals damage to the target creature and you succeed at the Performance check, the creature is Dazzled for 1 round.
+; <html><img src="https://foundry.atkennedy.com/icons/environment/settlement/watchtower-silhouette-yellow.webp" width="20" height="20" alt="Deny Advantage" style="vertical-align:middle;" /></html> '''Deny Advantage''' <small>(rogue)</small>
+: As someone who takes advantage of openings, you are careful not to leave such gaps yourself. You aren't Off-Guard to Hidden, Undetected, or flanking creatures of your level or lower, or creatures of your level or lower using surprise attack. However, they can still help their allies flank.
+; <html><img src="https://foundry.atkennedy.com/icons/magic/fire/explosion-embers-evade-silhouette.webp" width="20" height="20" alt="Evasive Reflexes" style="vertical-align:middle;" /></html> '''Evasive Reflexes''' <small>(rogue)</small>
+: You've learned to move quickly to avoid explosions, dragons' breath, and worse. Your proficiency rank for Reflex saves increases to master. When you roll a success on a Reflex save, you get a critical success instead.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Fleet" style="vertical-align:middle;" /></html> '''Fleet''' <small>(general)</small>
+: You move more quickly on foot. Your Speed increases by 5 feet.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Goblin Song" style="vertical-align:middle;" /></html> '''Goblin Song''' <small>(goblin)</small>
+: You sing annoying goblin songs, distracting your foes with silly and repetitive lyrics. Attempt a @Check[performance|defense:will] check against the Will DC of a single enemy within 30 feet. This has all the usual traits and restrictions of a Performance check to sing.
+
+You can affect up to two targets within range if you have expert proficiency in Performance, four if you have master proficiency, and eight if you have legendary proficiency.
+
+'''Critical Success''' The target takes a –1 status penalty to Perception checks and Will saves for 1 minute.
+
+Effect: Goblin Song (Critical Success)
+
+'''Success''' The target takes a –1 status penalty to Perception checks and Will saves for 1 round.
+
+Effect: Goblin Song (Success)
+
+'''Critical Failure''' The target is temporarily immune to Goblin Song for 1 hour.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Impressive Performance" style="vertical-align:middle;" /></html> '''Impressive Performance''' <small>(general, skill)</small>
+: Your performances inspire admiration and win you fans. You can Make an Impression using Performance instead of Diplomacy. If you spend at least 10 minutes performing in front of an audience, you can Make an Impression targeting up to 10 members of the audience who were there for the whole performance, without taking the normal penalty. The number of targets increases to 20 for a 1-hour performance and 50 for a 2-hour performance.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Intimidating Glare" style="vertical-align:middle;" /></html> '''Intimidating Glare''' <small>(general, skill)</small>
+: You can Demoralize with a mere glare. When you do, Demoralize loses the auditory trait and gains the visual trait, and you don't take a penalty if the creature doesn't understand your language.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Juggle" style="vertical-align:middle;" /></html> '''Juggle''' <small>(concentrate, general, manipulate, skill)</small>
+: You can Juggle items and still use your hands between tosses. You can use the Juggle action in several ways.
+
+You can start to Juggle with a single stored item, an item you were carrying, or an unattended item within your reach. The item must be of light or negligible Bulk. You Juggle the item until the end of your next turn, unless you use this feat against next turn to continue Juggling (see below). While you are Juggling, you can use this action again to add another item to the Juggle, which must meet all the same requirements. You can Juggle a number of items equal to one more than the number of hands you are using to Juggle.
+
+You can also use this action to continue Juggling as long as you aren't fatigued. When you do, you continue to Juggle until the end of your next turn. If you do not continue Juggling by the end of your turn, you cease Juggling and you drop all the items. You become fatigued if you continue Juggling for more than 10 minutes (60 rounds) within the course of an hour.
+
+As long as you're Juggling fewer than your maximum number of items, you have a free hand. You can wield weapons you are Juggling (but not shields or other items) as long as they can be wielded in one hand. For example, while you Juggle a dagger in one hand and wield a shield in the other, you are wielding the dagger but still have a free hand to Cast a Spell with a material component. Juggling two or more weapons with one hand doesn't allow you to use feats that require two weapons each held in a different hand.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Lie to Me" style="vertical-align:middle;" /></html> '''Lie to Me''' <small>(general, skill)</small>
+: You can use Deception to weave traps to trip up anyone trying to deceive you. If you can engage in conversation with someone trying to Lie to you, use your Deception DC if it is higher than your Perception DC to determine whether they succeed. This doesn't apply if you don't have a back-and-forth dialogue, such as when someone attempts to Lie during a long speech.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Loud Singer" style="vertical-align:middle;" /></html> '''Loud Singer''' <small>(goblin)</small>
+: Staying on pitch, proper breath control, and remembering the words are all less important than the real measure of a good singer: volume! The range of your Goblin Song is increased to 60 feet, and you can target one additional enemy when you use it.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Mobility" style="vertical-align:middle;" /></html> '''Mobility''' <small>(rogue)</small>
+: You move without leaving an opening. When you Stride and move half your Speed or less, that movement does not trigger reactions. You can use Mobility when Climbing, Flying, or Swimming instead of Striding if you have the corresponding movement type.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Nimble Dodge" style="vertical-align:middle;" /></html> '''Nimble Dodge''' <small>(rogue)</small>
+: '''Trigger''' A creature targets you with an attack and you can see the attacker.
+
+'''Requirements''' You are not encumbered.
+
+You deftly dodge out of the way, gaining a +2 circumstance bonus to AC against the triggering attack.
+; <html><img src="https://foundry.atkennedy.com/icons/magic/perception/eye-tendrils-web-purple.webp" width="20" height="20" alt="Perception Mastery" style="vertical-align:middle;" /></html> '''Perception Mastery''' <small>(barbarian, bard, commander, exemplar, gunslinger, investigator, ranger, rogue, swashbuckler, thaumaturge)</small>
+: '''Barbarian''' Your instinct heightens each of your senses further. Your proficiency rank for Perception increases to master.
+
+'''Bard, Gunslinger, Rogue''' You've developed keen awareness and attention to detail. Your proficiency rank for Perception increases to master.
+
+'''Commander''' You've developed the ability to see a scenario from every side. Your proficiency rank for Perception increases to master.
+
+'''Exemplar''' Through your adventures, you've developed keen awareness and attention to detail, the better to watch over your wards and keep an eye out for monsters and other threats. Your proficiency rank for Perception increases to master.
+
+'''Investigator, Swashbuckler, Thaumaturge''' Through your adventures, you've developed keen awareness and attention to detail. Your proficiency rank for Perception increases to master.
+
+'''Ranger''' You have highly developed acuity and attention to detail. Your proficiency rank for Perception increases to master.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Pistol Phenom Dedication" style="vertical-align:middle;" /></html> '''Pistol Phenom Dedication''' <small>(archetype, dedication)</small>
+: You catch an opponent Off-Guard by spinning your weapon. You gain the Pistol Twirl gunslinger feat, enabling you to Feint against creatures within your weapon's first range increment. This otherwise serves as Pistol Twirl for the purpose of meeting prerequisites, although as normal, it doesn't count as another pistol phenom feat for the purpose of meeting Pistol Phenom Dedication's special entry and taking another archetype. Whenever you Feint with a one-handed firearm, you can choose to attempt a {Performance} check instead of a Deception check.
+
+Pistol Phenom
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Pistol Twirl" style="vertical-align:middle;" /></html> '''Pistol Twirl''' <small>(gunslinger)</small>
+: '''Requirements''' You're wielding a loaded one-handed ranged weapon.
+
+Your quick gestures and flair for performance distract your opponent, leaving it vulnerable to your follow-up attacks. You Feint against an opponent within the required weapon's first range increment, rather than an opponent within melee reach. If you succeed, the foe is Off-Guard against your melee and ranged attacks, rather than only your melee attacks. On a critical failure, you're off-guard against the target's melee and ranged attacks, rather than only its melee attacks.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/documents/document-sealed-signatures-red.webp" width="20" height="20" alt="Rogue's Racket" style="vertical-align:middle;" /></html> '''Rogue's Racket''' <small>(rogue)</small>
+: You've begun to develop your techniques and approach to a job, while building your reputation in rogues' circles. Choose a rogue's racket from the list below.
+
+Eldritch Trickster
+
+Mastermind
+
+Ruffian
+
+Scoundrel
+
+Thief
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/scoundrel.webp" width="20" height="20" alt="Scoundrel" style="vertical-align:middle;" /></html> '''Scoundrel''' <small>(rogue)</small>
+: You use fast-talking, flattery, and a silver tongue to avoid danger and escape tricky situations. You might be a grifter or con artist, or you might use your skills in certain reputable professions, like a barrister or diplomat.
+
+When you successfully Feint, the target is Off-Guard against your melee attacks until the end of your next turn. On a critical success, the target is off-guard against all melee attacks until the end of your next turn, not just yours.
+
+If you Feint while wielding an agile or finesse melee weapon, you can step immediately after the Feint as a free action. You're trained in Deception and Diplomacy. You can choose Charisma as your key attribute.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Slippery Prey" style="vertical-align:middle;" /></html> '''Slippery Prey''' <small>(general, skill)</small>
+: You're able to escape bonds more easily than others. When you attempt to Escape using Acrobatics or Athletics, you reduce the multiple attack penalty for repeated attempts to –4 and –8 if you're trained in the skill. The penalty becomes –3 and –6 if you're a master in the appropriate skill. If you're legendary in the skill, you don't take penalties for multiple Escape attempts in the same turn. Regardless of your training, your attempts to Escape still have the attack trait and incur a multiple attack penalty with other actions.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/sneak-attack.webp" width="20" height="20" alt="Sneak Attack" style="vertical-align:middle;" /></html> '''Sneak Attack''' <small>(rogue)</small>
+: When your enemy can't properly defend itself, you take advantage to deal extra damage. If you Strike a creature that has the Off-Guard condition with an agile or finesse melee weapon, an agile or finesse unarmed attack, a ranged weapon attack, or a ranged unarmed attack, you deal an extra 1d6 precision damage. For a ranged attack with a thrown melee weapon, that weapon must also be agile or finesse.
+
+As your level increases, so does the number of damage dice for your sneak attack. Increase the number of dice by one at 5th, 11th, and 17th levels.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/surprice-attack.webp" width="20" height="20" alt="Surprise Attack" style="vertical-align:middle;" /></html> '''Surprise Attack''' <small>(rogue)</small>
+: You spring into combat faster than foes can react. On the first round of combat, if you roll Deception or Stealth for initiative, creatures that haven't acted are Off-Guard to you.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Terrified Retreat" style="vertical-align:middle;" /></html> '''Terrified Retreat''' <small>(general, skill)</small>
+: When you critically succeed at the Demoralize action, if the target's level is lower than yours, the target is Fleeing for 1 round.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Terrifying Resistance" style="vertical-align:middle;" /></html> '''Terrifying Resistance''' <small>(general, skill)</small>
+: The spells of those you have Demoralize are less effective on you. If you succeed in Demoralizing a creature, for the next 24 hours you gain a +1 circumstance bonus to saving throws against that creature's spells.
+; <html><img src="https://foundry.atkennedy.com/icons/sundries/books/book-red-exclamation.webp" width="20" height="20" alt="Toughness" style="vertical-align:middle;" /></html> '''Toughness''' <small>(general)</small>
+: Your body can withstand more punishment than most before succumbing. Increase your maximum Hit Points by your level. You reduce the DC of recovery checks by 1.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/weapon-specialization.webp" width="20" height="20" alt="Weapon Specialization" style="vertical-align:middle;" /></html> '''Weapon Specialization''' <small>(alchemist, animist, bard, champion, cleric, commander, druid, fighter, gunslinger, inventor, investigator, kineticist, ranger, rogue, sorcerer, summoner, swashbuckler, witch, wizard)</small>
+: You've learned how to inflict greater injuries with the weapons you know best. You deal an additional 2 damage with weapons and unarmed attacks in which you are an expert. This damage increases to 3 if you're a master, and 4 if you're legendary.
+; <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/features/classes/weapon-tricks.webp" width="20" height="20" alt="Weapon Tricks" style="vertical-align:middle;" /></html> '''Weapon Tricks''' <small>(rogue)</small>
+: You gain expert proficiency in simple weapons, martial weapons, and unarmed attacks. When you critically succeed at an attack roll against an Off-Guard creature while using an agile or finesse weapon or an agile or finesse unarmed attack, you apply the critical specialization effect for that weapon or unarmed attack.
+
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<b>🎒 Inventory</b>
+<div class="mw-collapsible-content">
+=====Weapons=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/guns/gun-pistol-brown.webp" width="24" height="24" alt="Air Repeater" style="vertical-align:middle;" /></html> || [[Air Repeater]] || 1 || 0.1 || 0 || 4 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/daggers/dagger-straight-blue.webp" width="24" height="24" alt="Dagger" style="vertical-align:middle;" /></html> || [[Dagger]] || 1 || 0.1 || 0 || 2 sp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/weapons/specific-magic-weapons/erraticannon.webp" width="24" height="24" alt="Erraticannon" style="vertical-align:middle;" /></html> || [[Erraticannon]] || 1 || 1 || 9 || 700 gp
+|}
+
+=====Armor & Shields=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/chest/breastplate-banded-simple-leather-brown.webp" width="24" height="24" alt="Leather Armor" style="vertical-align:middle;" /></html> || [[Leather Armor]] || 1 || 1 || 0 || 2 gp
+|}
+
+=====Consumables=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/consumables/potions/bottle-round-corked-orante-red.webp" width="24" height="24" alt="Healing Potion (Lesser)" style="vertical-align:middle;" /></html> || [[Healing Potion (Lesser)]] || 3 || 0.1 || 3 || 12 gp
+|}
+
+=====Ammunition=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-silver.webp" width="24" height="24" alt="Magazine with 6 Pellets" style="vertical-align:middle;" /></html> || [[Magazine with 6 Pellets]] || 1 || 0.1 || 0 || 6 sp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/weapons/ammunition/shot-round-lead.webp" width="24" height="24" alt="Rounds (Hand Cannon)" style="vertical-align:middle;" /></html> || [[Rounds (Hand Cannon)]] || 38 || 0.1 || 0 || 1 sp
+|}
+
+=====Equipment=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/worn-items/other-worn-items/aeon-stone-lavender-and-green-ellipsoid.webp" width="24" height="24" alt="Aeon Stone (Smoothing)" style="vertical-align:middle;" /></html> || [[Aeon Stone (Smoothing)]] || 1 || 0 || 7 || 310 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/runes/fundamental-armor-runes/armor-potency.webp" width="24" height="24" alt="Armor Potency (+1)" style="vertical-align:middle;" /></html> || [[Armor Potency (+1)]] || 1 || 0 || 5 || 160 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/worn-items/other-worn-items/blast-boots.webp" width="24" height="24" alt="Blast Foot" style="vertical-align:middle;" /></html> || [[Blast Foot]] || 1 || 1 || 6 || 250 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/other/attached-items/blazons-of-shared-power.webp" width="24" height="24" alt="Blazons of Shared Power" style="vertical-align:middle;" /></html> || [[Blazons of Shared Power]] || 1 || 0 || 3 || 52 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/head/hat-cocked-feather-green.webp" width="24" height="24" alt="Cassisian Helmet" style="vertical-align:middle;" /></html> || [[Cassisian Helmet]] || 1 || 0.1 || 6 || 225 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/icons/equipment/waist/belt-buckle-gem-red.webp" width="24" height="24" alt="Killer's Belt" style="vertical-align:middle;" /></html> || [[Killer's Belt]] || 1 || 0.1 || 4 || 95 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/worn-items/other-worn-items/mirror-robe.webp" width="24" height="24" alt="Mirror Robe" style="vertical-align:middle;" /></html> || [[Mirror Robe]] || 1 || 0.1 || 3 || 55 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/runes/fundamental-weapon-runes/striking.webp" width="24" height="24" alt="Striking" style="vertical-align:middle;" /></html> || [[Striking]] || 1 || 0 || 4 || 65 gp
+|}
+
+=====Treasure & Currency=====
+{| class="wikitable" style="width:100%;"
+! !! Item !! Qty !! Bulk !! Level !! Price
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/treasure/currency/gold-pieces.webp" width="24" height="24" alt="Gold Pieces" style="vertical-align:middle;" /></html> || [[Gold Pieces]] || 68 || 1 || 0 || 1 gp
+|-
+| <html><img src="https://foundry.atkennedy.com/systems/pf2e/icons/equipment/treasure/currency/silver-pieces.webp" width="24" height="24" alt="Silver Pieces" style="vertical-align:middle;" /></html> || [[Silver Pieces]] || 8 || 1 || 0 || 1 sp
+|}
+
+</div>
+</div>
+
+''Last synced: 2026-06-20 01:33''
+[[Category:Characters]]

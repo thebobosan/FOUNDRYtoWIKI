@@ -1,0 +1,2766 @@
+#!/usr/bin/env python3
+"""
+Foundry PF2e to MediaWiki - Full Exporter
+==========================================
+Reads PF2e characters from LevelDB, reconstructs stats via math engine,
+enriches items from system compendium packs, resolves Foundry icon URLs,
+and pushes formatted pages to MediaWiki.
+
+Usage:
+    python full-exporter.py                          # Preview all PCs
+    python full-exporter.py --push                   # Push all PCs to wiki
+    python full-exporter.py --char "Name"            # Preview one character
+    python full-exporter.py --char "Name" --push     # Push one character
+    python full-exporter.py --char "Name" --debug    # Dump raw system data
+"""
+
+import plyvel
+import json
+import mwclient
+import sys
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from datetime import datetime, timedelta
+from html.parser import HTMLParser
+
+# ════════════════════════════════════════════════════════════════════════════
+# Configuration
+# ════════════════════════════════════════════════════════════════════════════
+
+WORLD_PATH   = "/var/www/java/foundry.atkennedy.com/foundrydata/Data/worlds/temporary-title/"
+FOUNDRY_DATA = "/var/www/java/foundry.atkennedy.com/foundrydata/Data"
+FOUNDRY_URL  = "https://foundry.atkennedy.com"
+
+WIKI_URL      = "wiki.atkennedy.com"
+WIKI_USER     = "Oracle"
+WIKI_PASSWORD = os.environ.get("WIKI_PASSWORD", "942u09g4u09g4u0g2u0guu0gu0gwu0gw4u0gw4u0gw4eu0awdgda")
+
+COMPENDIUM_PACKS = [
+    "equipment", "spells", "feats", "actions",
+    "ancestries", "backgrounds", "classes", "heritages",
+    "class-features", "ancestry-features",
+]
+
+PROFICIENCY_MAP = {
+    0: {"name": "Untrained", "color": "#708090"},
+    1: {"name": "Trained",   "color": "#2e8b57"},
+    2: {"name": "Expert",    "color": "#4682b4"},
+    3: {"name": "Master",    "color": "#8a2be2"},
+    4: {"name": "Legendary", "color": "#d4af37"},
+}
+
+DEFAULT_ICONS = {
+    "weapon":     "systems/pf2e/icons/default-icons/weapon.svg",
+    "armor":      "systems/pf2e/icons/default-icons/armor.svg",
+    "shield":     "systems/pf2e/icons/default-icons/shield.svg",
+    "equipment":  "systems/pf2e/icons/default-icons/equipment.svg",
+    "consumable": "systems/pf2e/icons/default-icons/consumable.svg",
+    "backpack":   "systems/pf2e/icons/default-icons/backpack.svg",
+    "treasure":   "systems/pf2e/icons/default-icons/treasure.svg",
+    "feat":       "systems/pf2e/icons/default-icons/feat.svg",
+    "action":     "systems/pf2e/icons/default-icons/action.svg",
+    "spell":      "systems/pf2e/icons/default-icons/spell.svg",
+    "lore":       "systems/pf2e/icons/default-icons/lore.svg",
+    "character":  "systems/pf2e/icons/default-icons/mystery-man.svg",
+}
+GENERIC_ICON_FRAGMENTS = ("default-icons", "mystery-man", "iconics")
+
+# ════════════════════════════════════════════════════════════════════════════
+# Utility helpers
+# ════════════════════════════════════════════════════════════════════════════
+
+def icon_url(img: str, item_type: str = "") -> str:
+    path = img or ""
+    is_generic = not path or any(f in path for f in GENERIC_ICON_FRAGMENTS)
+    if is_generic:
+        path = DEFAULT_ICONS.get(item_type, "")
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return f"{FOUNDRY_URL}/{path.lstrip('/')}"
+
+
+def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
+    """
+    Render an external image using MediaWiki's <html> extension tag.
+    Requires $wgRawHtml = true in LocalSettings.php.
+    """
+    if not url:
+        return ""
+    alt_attr = alt.replace('"', "&quot;") if alt else ""
+    return (f'<html><img src="{url}" width="{size}" height="{size}" '
+            f'alt="{alt_attr}" style="vertical-align:middle;" /></html>')
+
+
+# Matches @UUID[...]{Label} — keep the label
+_UUID_RE = re.compile(r'@UUID\[[^\]]*\]\{([^}]+)\}')
+# Matches bare @UUID[...] with no label — drop
+_UUID_BARE_RE = re.compile(r'@UUID\[[^\]]*\]')
+# Matches Foundry inline roll expressions — drop entirely
+# Non-greedy with re.DOTALL handles nested brackets like [[/r 2d8[healing] #label]]
+_INLINE_ROLL_RE = re.compile(r'\[\[/.*?\]\]', re.DOTALL)
+
+
+def clean_foundry_text(text: str) -> str:
+    """
+    Remove Foundry-specific markup:
+      @UUID[...]{Label}  → Label
+      @UUID[...]         → (removed)
+      [[/r 2d8 ...]]     → (removed)
+    """
+    text = _UUID_RE.sub(r'\1', text)
+    text = _UUID_BARE_RE.sub('', text)
+    text = _INLINE_ROLL_RE.sub('', text)
+    return text
+
+
+def html_to_wikitext(text) -> str:
+    """
+    Convert Foundry HTML description text to MediaWiki wikitext.
+    """
+    if text is None:
+        return ""
+    if isinstance(text, list):
+        text = "\n\n".join(str(i) for i in text if i)
+    elif not isinstance(text, str):
+        text = str(text)
+    if not text.strip():
+        return ""
+
+    text = clean_foundry_text(text)
+
+    class _Converter(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.out        = []
+            self.list_depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "p":
+                if self.out:
+                    self.out.append("\n\n")
+            elif tag == "br":
+                self.out.append("<br />\n")
+            elif tag in ("ul", "ol"):
+                self.list_depth += 1
+            elif tag == "li":
+                self.out.append("\n" + "*" * self.list_depth + " ")
+            elif tag in ("strong", "b"):
+                self.out.append("'''")
+            elif tag in ("em", "i"):
+                self.out.append("''")
+            elif tag == "h1":
+                self.out.append("\n== ")
+            elif tag == "h2":
+                self.out.append("\n=== ")
+            elif tag == "h3":
+                self.out.append("\n==== ")
+            elif tag == "h4":
+                self.out.append("\n===== ")
+
+        def handle_endtag(self, tag):
+            if tag == "p":
+                self.out.append("\n\n")
+            elif tag in ("ul", "ol"):
+                self.list_depth = max(0, self.list_depth - 1)
+                if self.list_depth == 0:
+                    self.out.append("\n")
+            elif tag in ("strong", "b"):
+                self.out.append("'''")
+            elif tag in ("em", "i"):
+                self.out.append("''")
+            elif tag == "h1":
+                self.out.append(" ==\n")
+            elif tag == "h2":
+                self.out.append(" ===\n")
+            elif tag == "h3":
+                self.out.append(" ====\n")
+            elif tag == "h4":
+                self.out.append(" =====\n")
+
+        def handle_data(self, d):
+            self.out.append(d)
+
+        def result(self):
+            out = "".join(self.out).strip()
+            out = re.sub(r'\n{3,}', '\n\n', out)
+            out = re.sub(r'\n[ \t]+\n', '\n\n', out)
+            return out
+
+    c = _Converter()
+    c.feed(text)
+    return c.result()
+
+
+def strip_html(text) -> str:
+    """
+    Strip all HTML and return plain text. Use for infobox values and
+    other plain-text fields where wikitext markup is not wanted.
+    """
+    if text is None:
+        return ""
+    if isinstance(text, list):
+        text = "\n".join(str(i) for i in text if i)
+    elif not isinstance(text, str):
+        text = str(text)
+    if not text.strip():
+        return ""
+
+    text = clean_foundry_text(text)
+
+    class _S(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.out = []
+        def handle_data(self, d):
+            self.out.append(d)
+        def handle_starttag(self, tag, _):
+            if tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "h5"):
+                self.out.append("\n")
+        def result(self):
+            return re.sub(r'\n{3,}', '\n\n', "".join(self.out)).strip()
+
+    s = _S()
+    s.feed(text)
+    return s.result()
+
+
+def fmt_mod(val) -> str:
+    try:
+        v = int(val)
+        return f"+{v}" if v >= 0 else str(v)
+    except (ValueError, TypeError):
+        return "+0"
+
+
+def norm_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _int(val, default: int = 0) -> int:
+    """Safe int cast."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def collapsible(title: str, content: str, collapsed: bool = True) -> str:
+    """
+    Wrap content in a MediaWiki mw-collapsible div.
+    Requires no extensions — mw-collapsible is built into MediaWiki core.
+    """
+    state = " mw-collapsed" if collapsed else ""
+    return (
+        f'<div class="toccolours mw-collapsible{state}">\n'
+        f"<b>{title}</b>\n"
+        f'<div class="mw-collapsible-content">\n'
+        f"{content}\n"
+        f"</div>\n"
+        f"</div>\n"
+    )
+
+
+def make_site() -> mwclient.Site:
+    """Create and return an authenticated MediaWiki site connection."""
+    site = mwclient.Site(WIKI_URL, path="/")
+    site.login(WIKI_USER, WIKI_PASSWORD)
+    return site
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Compendium index
+# ════════════════════════════════════════════════════════════════════════════
+
+_COMP_CACHE_PATH = Path("session_snapshots/compendium_cache.json")
+
+def build_compendium_index(data_root: str) -> dict:
+    index = {}
+    if not data_root:
+        print("  ⚠  No data root — skipping compendium enrichment.")
+        return index
+
+    packs_root = Path(data_root) / "systems" / "pf2e" / "packs"
+    print(f"  Compendium path: {packs_root}")
+
+    if not packs_root.exists():
+        print(f"  ⚠  Path does not exist.")
+        return index
+
+    # Determine the newest mtime across all tracked pack directories
+    max_mtime = 0.0
+    for pack_name in COMPENDIUM_PACKS:
+        pack_path = packs_root / pack_name
+        if pack_path.exists():
+            for f in pack_path.rglob("*"):
+                try:
+                    max_mtime = max(max_mtime, f.stat().st_mtime)
+                except OSError:
+                    pass
+
+    # Load cache if it exists and packs haven't changed since it was written
+    if _COMP_CACHE_PATH.exists():
+        try:
+            cached = json.loads(_COMP_CACHE_PATH.read_text(encoding="utf-8"))
+            if cached.get("mtime", 0) >= max_mtime:
+                print(f"  Compendium index loaded from cache "
+                      f"({len(cached['index'])} entries).")
+                return cached["index"]
+        except Exception:
+            pass  # stale or corrupt cache — fall through to rebuild
+
+    available = sorted(p.name for p in packs_root.iterdir() if p.is_dir())
+    print(f"  Available packs ({len(available)}): {', '.join(available[:20])}"
+          + (" …" if len(available) > 20 else ""))
+
+    total = 0
+    for pack_name in COMPENDIUM_PACKS:
+        pack_path = packs_root / pack_name
+        if not pack_path.exists():
+            print(f"  ⚠  Pack not found: {pack_name}")
+            continue
+        tmp = tempfile.mkdtemp()
+        tmp_pack = Path(tmp) / pack_name
+        try:
+            shutil.copytree(str(pack_path), str(tmp_pack))
+            db = plyvel.DB(str(tmp_pack))
+            pack_count = 0
+            err_count  = 0
+            with db:
+                for raw_key, raw_val in db:
+                    k = raw_key.decode("utf-8", errors="replace")
+                    parts = k.split("!")
+                    if len(parts) not in (2, 3):
+                        continue
+                    try:
+                        entry = json.loads(raw_val)
+                        name  = entry.get("name", "")
+                        if not name:
+                            continue
+                        sys_data  = entry.get("system", {})
+                        desc_raw  = sys_data.get("description", {})
+                        desc      = desc_raw.get("value", "") if isinstance(desc_raw, dict) else ""
+                        traits_r  = sys_data.get("traits", {})
+                        traits    = traits_r.get("value", []) if isinstance(traits_r, dict) else []
+                        slug      = sys_data.get("slug", "")
+                        record    = {"img": entry.get("img", ""), "desc": desc,
+                                     "traits": traits, "slug": slug, "pack": pack_name}
+                        index[norm_name(name)] = record
+                        if slug:
+                            index[norm_name(slug)] = record
+                        pack_count += 1
+                        total += 1
+                    except Exception:
+                        err_count += 1
+            warn = f" ({err_count} parse errors)" if err_count else ""
+            print(f"    ✓ {pack_name}: {pack_count} entries{warn}")
+        except Exception as e:
+            print(f"  ⚠  Could not read pack '{pack_name}': {e}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    print(f"  Compendium index: {total} entries.")
+
+    # Save cache for next run
+    try:
+        _COMP_CACHE_PATH.parent.mkdir(exist_ok=True)
+        _COMP_CACHE_PATH.write_text(
+            json.dumps({"mtime": max_mtime, "index": index}),
+            encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"  ⚠  Could not save compendium cache: {e}")
+
+    return index
+
+
+def enrich_item(item: dict, compendium: dict) -> dict:
+    if not compendium:
+        return item
+    comp = compendium.get(norm_name(item.get("name", "")), {})
+    if not comp:
+        return item
+
+    enriched = dict(item)
+    actor_img = item.get("img", "")
+    if not actor_img or any(f in actor_img for f in GENERIC_ICON_FRAGMENTS):
+        if comp.get("img") and not any(f in comp["img"] for f in GENERIC_ICON_FRAGMENTS):
+            enriched["img"] = comp["img"]
+
+    sys_data  = dict(item.get("system", {}))
+    desc_node = sys_data.get("description", {})
+    actor_desc = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
+    if not actor_desc.strip() and comp.get("desc"):
+        desc_node = dict(desc_node) if isinstance(desc_node, dict) else {}
+        desc_node["value"] = comp["desc"]
+        sys_data["description"] = desc_node
+        enriched["system"] = sys_data
+
+    traits_node  = sys_data.get("traits", {})
+    actor_traits = traits_node.get("value", []) if isinstance(traits_node, dict) else []
+    if not actor_traits and comp.get("traits"):
+        traits_node = dict(traits_node) if isinstance(traits_node, dict) else {}
+        traits_node["value"] = comp["traits"]
+        sys_data["traits"] = traits_node
+        enriched["system"] = sys_data
+
+    return enriched
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Full exporter class
+# ════════════════════════════════════════════════════════════════════════════
+
+def _read_boost_slot(slot):
+    """
+    Return the ability slug(s) that a PF2e boost/flaw slot actually grants.
+
+    Slot shapes:
+      "str"                                 → "str"   (plain fixed)
+      {"value": "con"}                      → "con"   (dict fixed, single)
+      {"value": ["int","str"], "selected":"str"} → "str"  (player chose STR)
+      {"value": ["str","dex","con",...6..], "selected":"wis"} → "wis" (free pick)
+      {"value": ["str","dex","con",...6..], "selected":null}  → None  (not yet chosen)
+    """
+    if isinstance(slot, str):
+        return slot
+    if not isinstance(slot, dict):
+        return None
+    # "selected" is the player's actual choice; trust it when present and non-null
+    selected = slot.get("selected")
+    if selected and isinstance(selected, str):
+        return selected
+    val = slot.get("value")
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        if len(val) == 6:
+            return None          # all-6 placeholder with no selection = skip
+        return val               # short specific list
+    return None
+
+
+class FullExporter:
+
+    SKILL_ABILITY = {
+        "acrobatics": "dex", "arcana": "int", "athletics": "str", "crafting": "int",
+        "deception": "cha", "diplomacy": "cha", "intimidation": "cha", "medicine": "wis",
+        "nature": "wis", "occultism": "int", "performance": "cha", "religion": "wis",
+        "society": "int", "stealth": "dex", "survival": "wis", "thievery": "dex",
+    }
+
+    def __init__(self, world_path: str, data_root: str = FOUNDRY_DATA):
+        self.world_path = Path(world_path)
+        original = self.world_path / "data" / "actors"
+        if not original.exists():
+            raise FileNotFoundError(f"Actor database not found at {original}")
+
+        self.temp_dir  = tempfile.mkdtemp()
+        actors_copy    = Path(self.temp_dir) / "actors"
+        shutil.copytree(str(original), str(actors_copy))
+        self.actors_db = plyvel.DB(str(actors_copy))
+
+        print("Building compendium index…")
+        self.compendium = build_compendium_index(data_root)
+
+        # Combat record (last kill / last downed-by) is built lazily on first
+        # access via combat_record(), since it requires reading the messages DB
+        # and resolving token→actor names. Cached after first build.
+        self._combat_record = None
+
+    # ── Combat record (last kill / last knocked unconscious) ───────────────
+
+    def combat_record(self) -> dict:
+        """
+        Build per-actor combat record by replaying the chat message log.
+
+        Returns dict: actor_id → {
+            "last_kill":      {"name": victim, "ts": ms} or None,
+            "last_downed_by": {"name": attacker, "ts": ms} or None,
+        }
+
+        A "downing event" is any appliedDamage message whose HP update drives
+        a token to <= 0. The attacker is the origin.actor of that damage; the
+        victim is the actor the damage was applied to. Self-inflicted and
+        sourceless damage produce a downed-by entry with no false attacker.
+        """
+        if self._combat_record is not None:
+            return self._combat_record
+
+        record: dict = {}
+        events = self._build_downing_events()
+
+        for ev in events:   # events are chronological (ascending ts)
+            atk_id, atk_name = ev["attacker_id"], ev["attacker_name"]
+            vic_id, vic_name = ev["victim_id"],   ev["victim_name"]
+            ts               = ev["ts"]
+
+            # Victim: record who downed them (most recent wins — last assignment)
+            if vic_id:
+                rec = record.setdefault(vic_id, {"last_kill": None, "last_downed_by": None})
+                if atk_name and atk_id != vic_id:
+                    rec["last_downed_by"] = {"name": atk_name, "ts": ts}
+                else:
+                    # self-inflicted / persistent / sourceless
+                    rec["last_downed_by"] = {"name": ev.get("source_label") or "—", "ts": ts}
+
+            # Attacker: record their kill (any non-self victim counts)
+            if atk_id and atk_id != vic_id and vic_name:
+                rec = record.setdefault(atk_id, {"last_kill": None, "last_downed_by": None})
+                rec["last_kill"] = {"name": vic_name, "ts": ts}
+
+        self._combat_record = record
+        return record
+
+    def _build_downing_events(self) -> list:
+        """
+        Build a chronological list of downing events from the chat message log.
+
+        Strategy
+        ────────
+        The pf2e system sends two kinds of relevant messages:
+          A. appliedDamage messages — structured flags with origin.actor (attacker)
+             and uuid (victim). The 'value' field is the NEW remaining HP (not
+             damage dealt). In practice the killing blow often bypasses the
+             Apply Damage button so value never reaches 0 in the log.
+          B. Dying/unconscious condition cards — plain HTML messages with no
+             pf2e flags, but speaker.actor = the victim and content containing
+             the condition name.
+
+        We detect knockouts via (B), then walk backward through (A) to find
+        the most recent hit on that victim — that hit's origin.actor is the
+        attacker. No time window needed: "most recent hit before going down"
+        is the correct attribution regardless of gap.
+        """
+        messages_path = self.world_path / "data" / "messages"
+        if not messages_path.exists():
+            print("  ⚠  No messages database — combat record unavailable.")
+            return []
+
+        # Build actor id → name map from actors DB
+        name_by_actor: dict[str, str] = {}
+        for _, raw in self.actors_db.iterator():
+            try:
+                a = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(a, dict) and a.get("_id"):
+                name_by_actor[a["_id"]] = a.get("name", "Unknown")
+
+        # Load all messages
+        tmp      = tempfile.mkdtemp()
+        tmp_path = Path(tmp) / "messages"
+        raw_msgs = []
+        msg_errors = 0
+        try:
+            shutil.copytree(str(messages_path), str(tmp_path))
+            db = plyvel.DB(str(tmp_path))
+            with db:
+                for k, v in db:
+                    parts = k.decode("utf-8", "replace").split("!")
+                    if len(parts) not in (2, 3):
+                        continue
+                    try:
+                        m = json.loads(v)
+                        if isinstance(m, dict):
+                            raw_msgs.append(m)
+                    except Exception:
+                        msg_errors += 1
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if msg_errors:
+            print(f"  ⚠  {msg_errors} chat messages failed to parse and were skipped")
+
+        raw_msgs.sort(key=lambda m: m.get("timestamp", 0))
+
+        # ── Pass 1: build hit history per victim ─────────────────────────────
+        # Two attribution sources:
+        #   A. appliedDamage — structured, when Apply Damage button is used.
+        #   B. context.target — on ALL roll messages (attack + damage rolls),
+        #      captures hits even when damage is applied manually to HP.
+        hit_history: dict[str, list] = {}
+
+        _DYING_RE = re.compile(r'dying|unconscious', re.IGNORECASE)
+
+        for m in raw_msgs:
+            pf = (m.get("flags") or {}).get("pf2e") or {}
+            ts = m.get("timestamp", 0)
+
+            # Source A: appliedDamage (button-applied damage)
+            applied = pf.get("appliedDamage")
+            if isinstance(applied, dict) and not applied.get("isHealing"):
+                victim_id = self._uuid_to_actor_id(applied.get("uuid", ""))
+                if not victim_id:
+                    victim_id = (m.get("speaker") or {}).get("actor", "")
+                origin  = pf.get("origin") or {}
+                atk_id  = self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+                if victim_id and atk_id and atk_id != victim_id:
+                    hit_history.setdefault(victim_id, []).append(
+                        (ts, atk_id, name_by_actor.get(atk_id, ""))
+                    )
+
+            # Source B: context.target on attack/damage roll messages.
+            # Captures all attacks regardless of how damage is applied.
+            ctx = pf.get("context") or {}
+            if isinstance(ctx, dict):
+                target = ctx.get("target") or pf.get("target") or {}
+                if isinstance(target, dict):
+                    victim_id = target.get("actor", "")
+                    origin    = pf.get("origin") or {}
+                    atk_id    = (self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+                                 or self._uuid_to_actor_id((m.get("speaker") or {}).get("actor", "")))
+                    if victim_id and atk_id and atk_id != victim_id:
+                        hit_history.setdefault(victim_id, []).append(
+                            (ts, atk_id, name_by_actor.get(atk_id, ""))
+                        )
+
+        # Deduplicate by (ts, atk_id) and sort each actor's history
+        for vid in hit_history:
+            seen, deduped = set(), []
+            for entry in hit_history[vid]:
+                key = (entry[0], entry[1])
+                if key not in seen:
+                    seen.add(key); deduped.append(entry)
+            hit_history[vid] = sorted(deduped, key=lambda e: e[0])
+
+        # ── Pass 2: find dying condition messages; attribute via damage history ─
+        events = []
+        for m in raw_msgs:
+            # Dying condition cards have no pf2e flags and carry the condition
+            # name in their HTML content.
+            pf = (m.get("flags") or {}).get("pf2e") or {}
+            if pf:
+                continue   # structured messages are not condition cards
+
+            content = m.get("content", "")
+            if not _DYING_RE.search(content):
+                continue
+
+            spk       = m.get("speaker") or {}
+            victim_id = spk.get("actor", "")
+            if not victim_id:
+                continue
+            victim_name = name_by_actor.get(victim_id, "")
+            ts          = m.get("timestamp", 0)
+
+            # Find most recent hit on this victim BEFORE this timestamp.
+            # Sort by (timestamp, insertion index) so ties resolve deterministically.
+            history   = hit_history.get(victim_id, [])
+            preceding = sorted(
+                ((e, i) for i, e in enumerate(history) if e[0] <= ts),
+                key=lambda x: (x[0][0], x[1])
+            )
+            if preceding:
+                _, atk_id, atk_name = preceding[-1][0]
+            else:
+                atk_id, atk_name = "", ""
+
+            events.append({
+                "attacker_id":   atk_id,
+                "attacker_name": atk_name,
+                "victim_id":     victim_id,
+                "victim_name":   victim_name,
+                "source_label":  "",
+                "ts":            ts,
+            })
+
+        print(f"  Combat record: {len(events)} downing event(s) found "
+              f"(from {len(hit_history)} actors with hit history).")
+        return events
+
+    @staticmethod
+    def _uuid_to_actor_id(uuid: str) -> str:
+        """
+        Extract the actor id from a Foundry document UUID.
+        "Actor.abc"                              → "abc"
+        "Scene.x.Token.y.Actor.abc"              → "abc"
+        Returns "" if no Actor segment present.
+        """
+        if not uuid or "Actor." not in uuid:
+            return ""
+        # Take the segment immediately after the last "Actor."
+        tail = uuid.rsplit("Actor.", 1)[1]
+        return tail.split(".")[0] if tail else ""
+
+    # ── LevelDB helpers ───────────────────────────────────────────────────
+
+    def _get_actor_items(self, actor_id: str) -> list:
+        prefix = f"!actors.items!{actor_id}.".encode()
+        items  = []
+        for key, value in self.actors_db.iterator():
+            if key.startswith(prefix):
+                try:
+                    item = json.loads(value)
+                    if isinstance(item, dict):
+                        items.append(item)
+                except Exception as e:
+                    print(f"  ⚠  Failed to parse item {key!r}: {e}")
+        return items
+
+    def get_all_characters(self) -> list:
+        chars = []
+        for _, value in self.actors_db.iterator():
+            try:
+                actor = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(actor, dict) and actor.get("type") == "character":
+                chars.append(self._parse_character(actor))
+        return chars
+
+    def get_all_npcs(self) -> list:
+        npcs = []
+        for _, value in self.actors_db.iterator():
+            try:
+                actor = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(actor, dict) and actor.get("type") == "npc":
+                npcs.append(self._parse_npc(actor))
+        return npcs
+
+    def debug_dump(self, name: str):
+        """Dump raw system fields for a named actor, including full item data."""
+        for _, value in self.actors_db.iterator():
+            try:
+                actor = json.loads(value)
+            except Exception:
+                continue
+            if not isinstance(actor, dict):
+                continue
+            if actor.get("name", "").lower() != name.lower():
+                continue
+
+            system = actor.get("system", {})
+            keys_to_dump = [
+                "abilities", "saves", "skills",
+                ("attributes", "ac"),
+                ("attributes", "perception"),
+                ("attributes", "hp"),
+                ("attributes", "speed"),
+                "proficiencies",
+                "currency",
+                ("build", "attributes"),
+            ]
+            print(f"\n{'='*60}")
+            print(f"DEBUG DUMP: {actor.get('name')} (type={actor.get('type')})")
+            print('='*60)
+            for key in keys_to_dump:
+                if isinstance(key, tuple):
+                    val = system
+                    label = ".".join(key)
+                    for k in key:
+                        val = val.get(k, {}) if isinstance(val, dict) else {}
+                else:
+                    val = system.get(key, {})
+                    label = key
+                print(f"\nsystem.{label}:")
+                print(json.dumps(val, indent=2, default=str)[:2000])
+
+            items = self._get_actor_items(actor.get("_id", ""))
+            print(f"\nTotal items: {len(items)}")
+
+            # Show full system data for items critical to stat calculation
+            for itype in ("class", "ancestry", "background", "heritage"):
+                found = [i for i in items if i.get("type") == itype]
+                for item in found:
+                    isys = item.get("system") or {}
+                    print(f"\n── {itype.upper()} item: {item.get('name','?')} ──")
+                    # Show boosts/flaws/keyAbility/savingThrows/defenses/perception
+                    for field in ("boosts","flaws","keyAbility","savingThrows",
+                                  "defenses","perception","trainedSkills",
+                                  "trainedLore","hp","rules"):
+                        fval = isys.get(field)
+                        if fval is not None:
+                            dumped = json.dumps(fval, indent=2, default=str)
+                            # Truncate rules to keep output readable
+                            if field == "rules" and len(dumped) > 1500:
+                                dumped = dumped[:1500] + "\n  … (truncated)"
+                            print(f"  .{field}: {dumped}")
+
+            # Show treasure items — reveals coin storage format
+            treasure_items = [i for i in items if i.get("type") == "treasure"]
+            if treasure_items:
+                print(f"\n── TREASURE items ({len(treasure_items)}) ──")
+                for item in treasure_items[:12]:
+                    isys = item.get("system") or {}
+                    print(f"  {item.get('name','?')!r}")
+                    for field in ("quantity", "denomination", "stackGroup",
+                                  "price", "value", "weight", "bulk"):
+                        fval = isys.get(field)
+                        if fval is not None:
+                            print(f"    .{field}: {json.dumps(fval, default=str)}")
+                if len(treasure_items) > 12:
+                    print(f"  … and {len(treasure_items)-12} more")
+            return
+
+        print(f"✗  Actor '{name}' not found.")
+
+    # ── Ability score extraction ───────────────────────────────────────────
+
+    def _get_ability_mod(self, system: dict, slug: str,
+                          items: list = None) -> int:
+        """
+        Extract ability modifier. Priority:
+          1. system.abilities.<slug>.mod   — pre-computed modifier
+          2. system.abilities.<slug>.value — score ≥ 18 (treat as score)
+          3. system.abilities.<slug>        — plain int (legacy)
+          4. Rebuild from boosts across build.attributes + ancestry/class items
+        """
+        abilities = system.get("abilities")
+        # abilities can be None (null in JSON) — treat as absent
+        if isinstance(abilities, dict):
+            node = abilities.get(slug)
+            if isinstance(node, dict):
+                if node.get("mod") is not None:
+                    return _int(node["mod"])
+                # Only treat value as a score if it looks like one (>= 3 means
+                # a score of 3 which gives mod -3; actual scores start at 1+)
+                # Use heuristic: if value > 6 it's almost certainly a score not a mod
+                if node.get("value") is not None:
+                    v = _int(node["value"])
+                    if v > 6:
+                        return (v - 10) // 2
+                    # Small value — ambiguous; fall through to boost rebuild
+            elif isinstance(node, (int, float)):
+                return _int(node)
+
+        return self._ability_from_boosts(system, slug, items)
+
+    def _ability_from_boosts(self, system: dict, slug: str,
+                              items: list = None) -> int:
+        """
+        Reconstruct ability modifier from PF2e Remaster build data.
+
+        system.build.attributes.boosts only contains the FREE PICK tiers
+        (level 1, 5, 10, 15, 20). Ancestry, background, and class boosts
+        live on the respective ITEMS — we must read both sources.
+        """
+        score = 10
+
+        # ── Source 1: free-pick tiers + flaws in build.attributes ─────────
+        build = system.get("build") or {}
+        attrs = build.get("attributes") if isinstance(build, dict) else None
+        if isinstance(attrs, dict):
+            for flaw_list in (attrs.get("flaws") or {}).values():
+                if isinstance(flaw_list, list) and slug in flaw_list:
+                    score -= 2
+
+            for boost_list in (attrs.get("boosts") or {}).values():
+                if isinstance(boost_list, list) and slug in boost_list:
+                    score = score + 2 if score < 18 else score + 1
+
+            # Apex item boost
+            apex = attrs.get("apex")
+            if isinstance(apex, str) and apex == slug:
+                score = score + 2 if score < 18 else score + 1
+
+        # ── Source 2: ancestry / background / class / heritage items ──────
+        # ancestry/background: system.boosts[], system.flaws[]
+        # class:               system.keyAbility.value (str or list)
+        # heritage:            system.boost (str) or system.boosts (list)
+        for item in (items or []):
+            itype = item.get("type", "")
+            isys  = item.get("system") or {}
+
+            if itype in ("ancestry", "background"):
+                boosts_raw = isys.get("boosts") or []
+                boost_iter = boosts_raw.values() if isinstance(boosts_raw, dict) else boosts_raw
+                for slot in boost_iter:
+                    chosen = _read_boost_slot(slot)
+                    if chosen == slug or (isinstance(chosen, list) and slug in chosen):
+                        score = score + 2 if score < 18 else score + 1
+                flaws_raw = isys.get("flaws") or []
+                flaw_iter = flaws_raw.values() if isinstance(flaws_raw, dict) else flaws_raw
+                for slot in flaw_iter:
+                    chosen = _read_boost_slot(slot)
+                    if chosen == slug or (isinstance(chosen, list) and slug in chosen):
+                        score -= 2
+
+            elif itype == "class":
+                ka = isys.get("keyAbility") or {}
+                if isinstance(ka, dict):
+                    ka_val = ka.get("value", [])
+                elif isinstance(ka, str):
+                    ka_val = [ka]
+                else:
+                    ka_val = ka or []
+                if isinstance(ka_val, str):
+                    ka_val = [ka_val]
+                if slug in ka_val:
+                    score = score + 2 if score < 18 else score + 1
+
+            elif itype == "heritage":
+                b = isys.get("boost") or isys.get("boosts")
+                if isinstance(b, str) and b == slug:
+                    score = score + 2 if score < 18 else score + 1
+                elif isinstance(b, list) and slug in b:
+                    score = score + 2 if score < 18 else score + 1
+
+        return (score - 10) // 2
+
+    # ── Proficiency rank helpers ──────────────────────────────────────────
+
+    @staticmethod
+    def _rank_from_node(node) -> int:
+        """
+        Extract a proficiency rank (0-4) from a node.
+
+        IMPORTANT: only an explicit 'rank' key is a rank. A bare 'value' on a
+        skill/save node is the TOTAL MODIFIER, not a rank, so we must not fall
+        back to it — doing so misreads e.g. {"value": 8} as rank 8.
+        A plain int node IS treated as a rank (class items store ranks this way).
+        """
+        if isinstance(node, dict):
+            r = node.get("rank", 0)
+            if isinstance(r, dict):
+                r = r.get("value", 0)
+            rank = _int(r)
+        elif isinstance(node, (int, float)):
+            rank = _int(node)
+        else:
+            rank = 0
+        # Clamp to the valid PF2e proficiency range
+        return max(0, min(4, rank))
+
+    def _rules_ranks(self, items: list, level: int) -> dict:
+        """
+        Collect all proficiency rank grants from every item on the actor.
+
+        Two sources per item:
+          1. ActiveEffectLike rules  — heritage, class-feature, feat, etc.
+          2. system.trainedSkills.value — flat list of skill slugs trained by
+             backgrounds and classes that don't use rules for skill grants.
+
+        Returns dict mapping short keys → effective rank int, e.g.:
+          "saves.fortitude" → 2, "skills.athletics" → 1, "perception" → 1
+        """
+        _SKILL_SLUGS = (
+            "acrobatics","arcana","athletics","crafting","deception",
+            "diplomacy","intimidation","medicine","nature","occultism",
+            "performance","religion","society","stealth","survival","thievery",
+        )
+        PATH_MAP = {
+            "system.saves.fortitude.rank":              "saves.fortitude",
+            "system.saves.reflex.rank":                 "saves.reflex",
+            "system.saves.will.rank":                   "saves.will",
+            "system.attributes.perception.rank":        "perception",
+            "system.proficiencies.defenses.unarmored.rank": "defenses.unarmored",
+            "system.proficiencies.defenses.light.rank":     "defenses.light",
+            "system.proficiencies.defenses.medium.rank":    "defenses.medium",
+            "system.proficiencies.defenses.heavy.rank":     "defenses.heavy",
+            **{f"system.skills.{s}.rank": f"skills.{s}" for s in _SKILL_SLUGS},
+        }
+        ranks: dict[str, int] = {}
+
+        # Scan every item — backgrounds and ancestries need to be included
+        # because they hold skill training data that class-features do not.
+        RULE_TYPES = ("class", "class-feature", "ancestry-feature", "ancestry",
+                      "background", "feat", "heritage")
+
+        for item in items:
+            itype = item.get("type", "")
+            isys  = item.get("system") or {}
+
+            # ── Source A: ActiveEffectLike rules ──────────────────────────
+            if itype in RULE_TYPES:
+                for rule in (isys.get("rules") or []):
+                    if not isinstance(rule, dict):
+                        continue
+                    if rule.get("key") != "ActiveEffectLike":
+                        continue
+                    mode = rule.get("mode", "")
+                    if mode not in ("override", "upgrade"):
+                        continue
+                    path = rule.get("path", "")
+                    if path not in PATH_MAP:
+                        continue
+                    value = _int(rule.get("value", 0))
+                    if value <= 0:
+                        continue
+                    if not self._rule_applies(rule, level):
+                        continue
+                    key = PATH_MAP[path]
+                    if mode == "override":
+                        ranks[key] = value
+                    else:
+                        ranks[key] = max(ranks.get(key, 0), value)
+
+            # ── Source B: system.trainedSkills.value ──────────────────────
+            # Backgrounds and classes often list trained skills as a flat
+            # array rather than individual rules.
+            if itype in ("class", "background", "ancestry", "heritage",
+                         "class-feature", "ancestry-feature"):
+                trained = isys.get("trainedSkills") or {}
+                skill_list = (trained.get("value", [])
+                              if isinstance(trained, dict) else
+                              (trained if isinstance(trained, list) else []))
+                for s in skill_list:
+                    if isinstance(s, str) and s in _SKILL_SLUGS:
+                        ranks[f"skills.{s}"] = max(ranks.get(f"skills.{s}", 0), 1)
+
+        return ranks
+
+    @staticmethod
+    def _rule_applies(rule: dict, level: int) -> bool:
+        """
+        Evaluate whether a rule's level predicate passes for the character's level.
+        Handles the most common PF2e predicate formats; unknown formats → True.
+        """
+        # Some rules have a direct top-level "level" field
+        rule_level = rule.get("level")
+        if rule_level is not None:
+            try:
+                return level >= int(rule_level)
+            except (TypeError, ValueError):
+                pass
+
+        predicate = rule.get("predicate")
+        if predicate is None:
+            return True  # no predicate → always applies
+
+        if isinstance(predicate, str):
+            m = re.match(r"self:level:(\d+)", predicate)
+            return level >= int(m.group(1)) if m else True
+
+        if isinstance(predicate, list):
+            for cond in predicate:
+                if isinstance(cond, str):
+                    m = re.match(r"self:level:(\d+)", cond)
+                    if m and level < int(m.group(1)):
+                        return False
+                elif isinstance(cond, dict):
+                    for op, operands in cond.items():
+                        if not isinstance(operands, list) or len(operands) != 2:
+                            continue
+                        lhs, rhs = operands
+                        if lhs != "self:level":
+                            continue
+                        try:
+                            rhs_int = int(rhs)
+                        except (TypeError, ValueError):
+                            continue
+                        if op == "gte" and level < rhs_int:
+                            return False
+                        elif op == "lte" and level > rhs_int:
+                            return False
+                        elif op == "eq" and level != rhs_int:
+                            return False
+            return True
+
+        return True  # unknown predicate format → assume applies
+
+    def _save_rank(self, system: dict, items: list, slug: str,
+                   rules_ranks: dict = None) -> int:
+        # 1. Pre-computed rank stored on the actor (present in some Foundry versions)
+        saves = system.get("saves") or {}
+        node  = saves.get(slug, {})
+        rank  = self._rank_from_node(node)
+        if rank:
+            return rank
+
+        # 2. Rules-based rank (ActiveEffectLike rules on class/class-feature items)
+        #    This correctly handles level-gated proficiency upgrades like
+        #    "Expert Fortitude at level 3" without hardcoding class progressions.
+        rr = rules_ranks or {}
+        rr_key = f"saves.{slug}"
+        if rr.get(rr_key, 0):
+            return rr[rr_key]
+
+        # 3. Static fields on the class item (initial rank before upgrades)
+        for item in items:
+            if item.get("type") == "class":
+                s = item.get("system") or {}
+                if not isinstance(s, dict):
+                    continue
+                for path in (
+                    (s.get("savingThrows") or {}).get(slug),
+                    s.get(slug),
+                ):
+                    if path is not None:
+                        r = self._rank_from_node(path)
+                        if r:
+                            return r
+        return 0
+
+    def _perception_rank(self, system: dict, items: list = None,
+                          rules_ranks: dict = None) -> int:
+        # 1. Pre-computed rank on the actor
+        perc = system.get("perception") or {}
+        rank = self._rank_from_node(perc)
+        if rank:
+            return rank
+        perc2 = (system.get("attributes") or {}).get("perception") or {}
+        rank = self._rank_from_node(perc2)
+        if rank:
+            return rank
+        # 2. Rules-based rank
+        rr = rules_ranks or {}
+        if rr.get("perception", 0):
+            return rr["perception"]
+        # 3. Static field on the class item: system.perception (int or {value:N})
+        for item in (items or []):
+            if item.get("type") == "class":
+                s = item.get("system") or {}
+                if not isinstance(s, dict):
+                    continue
+                for path in (s.get("perception"), (s.get("proficiencies") or {}).get("perception")):
+                    if path is not None:
+                        r = self._rank_from_node(path)
+                        if r:
+                            return r
+        return 1  # all classes get at least Trained perception — safe default
+
+    def _armor_prof_rank(self, system: dict, items: list, category: str,
+                          rules_ranks: dict = None) -> int:
+        # 1. Pre-computed on actor
+        defenses = (system.get("proficiencies") or {}).get("defenses") or {}
+        if isinstance(defenses, dict) and category in defenses:
+            r = self._rank_from_node(defenses[category])
+            if r:
+                return r
+        # 2. Rules-based rank
+        rr = rules_ranks or {}
+        if rr.get(f"defenses.{category}", 0):
+            return rr[f"defenses.{category}"]
+
+        for item in items:
+            if item.get("type") == "class":
+                s = item.get("system") or {}
+                if not isinstance(s, dict):
+                    continue
+                # PF2e stores armor proficiency under several paths across versions:
+                #   system.defenses.<cat>              (v5+)
+                #   system.proficiencies.defenses.<cat> (some intermediate versions)
+                #   system.<cat>                        (legacy)
+                for path in (
+                    (s.get("defenses") or {}).get(category),
+                    (s.get("proficiencies") or {}).get("defenses", {}).get(category),
+                    s.get(category),
+                ):
+                    if path is not None:
+                        r = self._rank_from_node(path)
+                        if r:
+                            return r
+                # Name-based fallback: old Foundry data may lack structured armor fields.
+                # Only reached when all structured lookups fail.
+                cname = item.get("name", "").lower()
+                if any(c in cname for c in ("fighter", "champion", "ranger", "barbarian",
+                                            "investigator", "swashbuckler", "magus",
+                                            "gunslinger", "inventor")):
+                    if category in ("unarmored", "light", "medium", "heavy"):
+                        return 1
+                # All classes get unarmored trained
+                if category == "unarmored":
+                    return 1
+        return 1 if category == "unarmored" else 0
+
+    # ── Math engine ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_equipped(item: dict) -> bool:
+        eq = item.get("system", {}).get("equipped", {})
+        if isinstance(eq, dict):
+            return (eq.get("inSlot") is True
+                    or eq.get("value") is True
+                    or eq.get("carryType") == "worn")
+        return bool(eq)
+
+    def _calc_ac(self, system: dict, items: list, level: int, dex_mod: int,
+                  rules_ranks: dict = None) -> int:
+        precomp = (system.get("attributes") or {}).get("ac") or {}
+        if isinstance(precomp, dict) and precomp.get("value") is not None:
+            return _int(precomp["value"])
+
+        equipped = next((i for i in items
+                         if i.get("type") == "armor" and self._is_equipped(i)), None)
+        if equipped:
+            s       = equipped.get("system") or {}
+            ac_val  = _int(s.get("acBonus", 0))
+            cat_raw = s.get("category", "unarmored")
+            cat     = cat_raw.get("value", "unarmored") if isinstance(cat_raw, dict) else (cat_raw or "unarmored")
+            potency = _int((s.get("potencyRune") or {}).get("value", 0)
+                           if isinstance(s.get("potencyRune"), dict) else s.get("potencyRune", 0))
+            dex_cap_raw = s.get("dexCap")
+            dex_cap = _int(dex_cap_raw.get("value", 99)
+                           if isinstance(dex_cap_raw, dict) else (dex_cap_raw if dex_cap_raw is not None else 99))
+        else:
+            ac_val, cat, potency, dex_cap = 0, "unarmored", 0, 99
+
+        rank        = self._armor_prof_rank(system, items, cat, rules_ranks)
+        applied_dex = min(dex_mod, dex_cap)
+        prof_bonus  = (level + rank * 2) if rank > 0 else 0
+        return 10 + ac_val + potency + prof_bonus + applied_dex
+
+    def _calc_save(self, system: dict, items: list, slug: str,
+                   ability_mod: int, level: int,
+                   rules_ranks: dict = None) -> tuple[int, int]:
+        rank = self._save_rank(system, items, slug, rules_ranks)
+
+        saves = system.get("saves") or {}
+        node  = saves.get(slug) or {}
+        if isinstance(node, dict) and node.get("value") is not None:
+            return _int(node["value"]), rank
+
+        prof_bonus = (level + rank * 2) if rank > 0 else 0
+        resilient  = 0
+        for item in items:
+            if item.get("type") == "armor" and self._is_equipped(item):
+                res = (item.get("system") or {}).get("resilientRune", 0)
+                resilient = _int(res.get("value", 0) if isinstance(res, dict) else res)
+                break
+        return prof_bonus + ability_mod + resilient, rank
+
+    def _calc_perception(self, system: dict, level: int, wis_mod: int,
+                          items: list = None, rules_ranks: dict = None) -> tuple[int, int]:
+        rank = self._perception_rank(system, items, rules_ranks)
+
+        perc = system.get("perception") or {}
+        if isinstance(perc, dict) and perc.get("value") is not None:
+            return _int(perc["value"]), rank
+        perc2 = (system.get("attributes") or {}).get("perception") or {}
+        if isinstance(perc2, dict) and perc2.get("value") is not None:
+            return _int(perc2["value"]), rank
+
+        prof_bonus = (level + rank * 2) if rank > 0 else 0
+        return prof_bonus + wis_mod, rank
+
+    def _calc_skill(self, skill_data: dict, ability_mod: int, level: int) -> tuple[int, int]:
+        if not isinstance(skill_data, dict):
+            return ability_mod, 0
+
+        rank = self._rank_from_node(skill_data.get("rank", 0))
+
+        if skill_data.get("value") is not None:
+            return _int(skill_data["value"]), rank
+
+        prof_bonus = (level + rank * 2) if rank > 0 else 0
+        return prof_bonus + ability_mod, rank
+
+    # ── Character parsing ─────────────────────────────────────────────────
+
+    def _get_detail_field(self, details: dict, key: str) -> str:
+        if not isinstance(details, dict):
+            return ""
+        field = details.get(key, "")
+        return field.get("value", "") if isinstance(field, dict) else (field or "")
+
+    def _parse_character(self, actor: dict) -> dict:
+        system   = actor.get("system") or {}
+        details  = system.get("details") or {}
+        attrs    = system.get("attributes") or {}
+        bio      = details.get("biography") or {}
+
+        hp_data  = attrs.get("hp") or {}
+        hp_max   = _int((hp_data.get("max") or hp_data.get("value", 0)) if isinstance(hp_data, dict) else 0)
+        hp_val   = _int(hp_data.get("value", 0) if isinstance(hp_data, dict) else 0)
+        hp_temp  = _int(hp_data.get("temp", 0) if isinstance(hp_data, dict) else 0)
+
+        actor_id  = actor.get("_id")
+        raw_items = self._get_actor_items(actor_id)
+        items     = [enrich_item(i, self.compendium) for i in raw_items]
+
+        lvl_f = details.get("level", 1)
+        level = _int(lvl_f.get("value", 1) if isinstance(lvl_f, dict) else (lvl_f or 1))
+
+        abilities = {ab: self._get_ability_mod(system, ab, items)
+                     for ab in ("str", "dex", "con", "int", "wis", "cha")}
+
+        # Compute rules-based ranks once — reads ActiveEffectLike rules on
+        # class/class-feature items with level predicates (e.g. Expert Fort at lvl 3)
+        rules_ranks              = self._rules_ranks(items, level)
+
+        ac                       = self._calc_ac(system, items, level, abilities["dex"], rules_ranks)
+        fort_total, fort_rank    = self._calc_save(system, items, "fortitude", abilities["con"], level, rules_ranks)
+        ref_total,  ref_rank     = self._calc_save(system, items, "reflex",    abilities["dex"], level, rules_ranks)
+        will_total, will_rank    = self._calc_save(system, items, "will",      abilities["wis"], level, rules_ranks)
+        perc_total, perc_rank    = self._calc_perception(system, level, abilities["wis"], items, rules_ranks)
+
+        speed_node  = attrs.get("speed") or {}
+        speed_val   = _int(speed_node.get("value") or speed_node.get("total", 25)
+                           if isinstance(speed_node, dict) else (speed_node or 25))
+        other_speeds = [{"type": sp["type"].title(), "value": _int(sp["value"])}
+                        for sp in (speed_node.get("otherSpeeds", [])
+                                   if isinstance(speed_node, dict) else [])
+                        if isinstance(sp, dict) and sp.get("type") and sp.get("value")]
+
+        size_raw  = (system.get("traits") or {}).get("size") or {}
+        size_val  = size_raw.get("value", "med") if isinstance(size_raw, dict) else (size_raw or "med")
+        SIZE_LABELS = {"tiny":"Tiny","sm":"Small","med":"Medium",
+                       "lg":"Large","huge":"Huge","grg":"Gargantuan"}
+        size_label = SIZE_LABELS.get(str(size_val).lower(), str(size_val).title())
+
+        senses = []
+        perc_senses = ((system.get("perception") or {}).get("senses")
+                       or (attrs.get("perception") or {}).get("senses", []))
+        if not perc_senses:
+            senses_raw  = (system.get("traits") or {}).get("senses") or {}
+            perc_senses = (senses_raw.get("value", []) if isinstance(senses_raw, dict)
+                           else (senses_raw if isinstance(senses_raw, list) else []))
+        for s in perc_senses:
+            if isinstance(s, dict):
+                stype  = s.get("type", s.get("value", ""))
+                label  = stype.replace("-", " ").title()
+                acuity = s.get("acuity", "")
+                if acuity and acuity != "precise":
+                    label += f" ({acuity})"
+                if s.get("range"):
+                    label += f" {s['range']} ft."
+                if label:
+                    senses.append(label)
+            elif isinstance(s, str) and s:
+                senses.append(s.replace("-", " ").title())
+
+        def _parse_iwr(raw):
+            out = []
+            if not isinstance(raw, list):
+                return out
+            for entry in raw:
+                if isinstance(entry, dict):
+                    etype = entry.get("type", entry.get("value", ""))
+                    if not etype:
+                        continue
+                    label = etype.replace("-", " ").title()
+                    val = entry.get("value")
+                    if isinstance(val, (int, float)) and val:
+                        label += f" {_int(val)}"
+                    exc = entry.get("exceptions", [])
+                    if exc:
+                        label += f" (except {', '.join(str(e) for e in exc)})"
+                    out.append(label)
+                elif isinstance(entry, str) and entry:
+                    out.append(entry.replace("-", " ").title())
+            return out
+
+        immunities  = _parse_iwr(attrs.get("immunities",  []))
+        weaknesses  = _parse_iwr(attrs.get("weaknesses",  []))
+        resistances = _parse_iwr(attrs.get("resistances", []))
+
+        conditions = []
+        for cname in ("dying","wounded","doomed","drained","enfeebled",
+                      "clumsy","stupefied","frightened","sickened","slowed","stunned"):
+            node = attrs.get(cname) or {}
+            val  = _int(node.get("value", 0) if isinstance(node, dict) else (node or 0))
+            if val > 0:
+                conditions.append({"name": cname.title(), "value": val})
+        for item in items:
+            if item.get("type") == "condition":
+                cname = item.get("name", "")
+                isys  = item.get("system") or {}
+                cval  = (isys.get("value", {}).get("value")
+                         if isinstance(isys.get("value"), dict)
+                         else isys.get("value"))
+                if cname and not any(c["name"].lower() == cname.lower() for c in conditions):
+                    conditions.append({"name": cname, "value": cval})
+
+        # ── Currency ──────────────────────────────────────────────────────
+        # system.currency stores the wallet. Values may be plain ints or
+        # {value: N} dicts depending on Foundry version.
+        cur_node = system.get("currency") or {}
+
+        def _coin(denom: str) -> int:
+            v = cur_node.get(denom, 0)
+            if isinstance(v, dict):
+                return _int(v.get("value", 0))
+            return _int(v)
+
+        currency = {c: _coin(c) for c in ("pp", "gp", "sp", "cp")}
+
+        # Coins can also be carried as treasure items in the inventory.
+        # PF2e Remaster stores them WITHOUT a stackGroup — just a price
+        # with a coin denomination and a quantity. We read any treasure
+        # item whose price is expressed in pp/gp/sp/cp.
+        # e.g. "Silver Pieces": quantity=5, price={value:{sp:1}, per:1}
+        for item in items:
+            if item.get("type") != "treasure":
+                continue
+            isys  = item.get("system") or {}
+            qty   = isys.get("quantity", 1)
+            qty   = _int(qty.get("value", 1) if isinstance(qty, dict) else qty)
+            price = isys.get("price") or {}
+            if isinstance(price, dict):
+                pval = price.get("value") or {}
+                per  = _int(price.get("per", 1) or 1)
+                if per < 1:
+                    per = 1
+                if isinstance(pval, dict):
+                    for denom in ("pp", "gp", "sp", "cp"):
+                        pv = pval.get(denom)
+                        pv = _int(pv.get("value") if isinstance(pv, dict) else pv)
+                        if pv:
+                            # price is per-unit value × quantity ÷ per
+                            currency[denom] = (currency.get(denom, 0)
+                                               + pv * qty // per)
+
+        # ── Bulk ──────────────────────────────────────────────────────────
+        # system.bulk is not pre-computed in Remaster — calculate from items.
+        # Rules: L=0.1 bulk, "-"=0, integers as-is. Multiply by quantity.
+        # Coins (treasure items priced at exactly 1 coin per unit) follow the
+        # PF2e rule of 1 bulk per 1,000 coins; they must not use the standard
+        # qty × bulk formula or the total becomes wildly inflated.
+        # Encumbered threshold = STR_mod + 5; max = STR_mod + 10.
+        def _is_coin_item(item: dict) -> bool:
+            if item.get("type") != "treasure":
+                return False
+            price = (item.get("system") or {}).get("price") or {}
+            if not isinstance(price, dict):
+                return False
+            if _int(price.get("per", 1)) != 1:
+                return False
+            pval = price.get("value") or {}
+            if not isinstance(pval, dict):
+                return False
+            coin_denoms = {k for k in ("pp", "gp", "sp", "cp") if pval.get(k)}
+            return len(coin_denoms) == 1 and all(_int(pval[d]) == 1 for d in coin_denoms)
+
+        def _item_bulk(item: dict) -> float:
+            isys = item.get("system") or {}
+            bn   = isys.get("bulk")
+            val  = (bn.get("value", "-") if isinstance(bn, dict) else bn)
+            if val in ("L", "l"):        return 0.1
+            if val in ("-", "", None):   return 0.0
+            try:    return float(val)
+            except: return 0.0
+
+        _PHYSICAL = {"weapon","armor","shield","consumable","ammo",
+                     "equipment","treasure","backpack","kit"}
+
+        coin_total = 0
+        noncoin_bulk = 0.0
+        for i in items:
+            if i.get("type") not in _PHYSICAL:
+                continue
+            isys = i.get("system") or {}
+            qty_raw = isys.get("quantity", 1)
+            qty = _int(qty_raw.get("value", 1) if isinstance(qty_raw, dict) else qty_raw)
+            if _is_coin_item(i):
+                coin_total += qty
+            else:
+                noncoin_bulk += _item_bulk(i) * qty
+
+        bulk_current = round(noncoin_bulk + coin_total // 1000, 1)
+        str_mod  = abilities.get("str", 0)
+        bulk_enc = 5 + str_mod
+        bulk_max = 10 + str_mod
+
+        # Investiture: count items actually marked invested rather than reading
+        # system.resources.investiture.value, which Foundry does not reliably update.
+        invest_node = (system.get("resources") or {}).get("investiture") or {}
+        invest_val  = sum(
+            1 for i in items
+            if isinstance((i.get("system") or {}).get("equipped"), dict)
+            and (i.get("system") or {}).get("equipped", {}).get("invested") is True
+        )
+        invest_max  = _int(invest_node.get("max", 10) if isinstance(invest_node, dict) else 10)
+
+        pronouns = bio.get("pronouns", details.get("pronouns", ""))
+        if isinstance(pronouns, dict):
+            pronouns = pronouns.get("value", "")
+        attitude       = html_to_wikitext(bio.get("attitude",      ""))
+        edicts         = html_to_wikitext(bio.get("edicts",        ""))
+        anathema       = html_to_wikitext(bio.get("anathema",      ""))
+        campaign_notes = html_to_wikitext(bio.get("campaignNotes", bio.get("notes", "")))
+
+        skills_raw = system.get("skills") or {}
+        SKILL_ABILITY = self.SKILL_ABILITY
+        skills = {}
+        for key, label in {
+            "acrobatics":"Acrobatics","arcana":"Arcana","athletics":"Athletics",
+            "crafting":"Crafting","deception":"Deception","diplomacy":"Diplomacy",
+            "intimidation":"Intimidation","medicine":"Medicine","nature":"Nature",
+            "occultism":"Occultism","performance":"Performance","religion":"Religion",
+            "society":"Society","stealth":"Stealth","survival":"Survival","thievery":"Thievery",
+        }.items():
+            # Merge stored rank with rules-granted rank (e.g. heritage/class feature)
+            raw = skills_raw.get(key)
+            stored_data = dict(raw) if isinstance(raw, dict) else {}
+            rules_rank  = rules_ranks.get(f"skills.{key}", 0)
+            if rules_rank > _int(stored_data.get("rank", 0)):
+                stored_data["rank"] = rules_rank
+                # Discard any stale precomputed total so _calc_skill recomputes
+                # from the corrected rank instead of returning the old value.
+                stored_data.pop("value", None)
+            total, rank = self._calc_skill(stored_data,
+                                           abilities[SKILL_ABILITY[key]], level)
+            skills[label] = {"total": total, "rank": rank}
+
+        for item in items:
+            if item.get("type") == "lore":
+                lore_name = item.get("name", "Unknown Lore").title()
+                s = item.get("system") or {}
+                lore_rank = _int(s.get("rank", {}).get("value", 0)
+                                 if isinstance(s.get("rank"), dict) else s.get("rank", 0))
+                prof = (level + lore_rank * 2) if lore_rank > 0 else 0
+                skills[lore_name] = {"total": prof + abilities["int"], "rank": lore_rank}
+
+        res         = system.get("resources") or {}
+        hp_field    = res.get("heroPoints") or {}
+        hero_pts    = _int(hp_field.get("value", 0) if isinstance(hp_field, dict) else hp_field)
+        focus_field = res.get("focus") or {}
+        focus_max   = _int(focus_field.get("max", 0)   if isinstance(focus_field, dict) else 0)
+        focus_val   = _int(focus_field.get("value", 0) if isinstance(focus_field, dict) else 0)
+
+        lang_f    = details.get("languages") or {}
+        lang_list = (lang_f.get("value", []) if isinstance(lang_f, dict)
+                     else (lang_f if isinstance(lang_f, list) else []))
+
+        portrait = icon_url(actor.get("img", ""), "character")
+
+        feats, spells, spell_entries = [], [], {}
+        for item in items:
+            itype = item.get("type", "")
+
+            if itype in ("feat","feature","ancestry-feature","heritage",
+                         "class-feature","background","archetype","action"):
+                isys     = item.get("system") or {}
+                traits_v = isys.get("traits", {}).get("value", []) if isinstance(isys.get("traits"), dict) else []
+                action_t = ""
+                if itype == "action":
+                    action_t = isys.get("actionType", {}).get("value", "") if isinstance(isys.get("actionType"), dict) else ""
+                desc_node = isys.get("description") or {}
+                desc = html_to_wikitext(desc_node.get("value", "") if isinstance(desc_node, dict) else "")
+                feats.append({
+                    "name": item.get("name", ""),
+                    "type": itype if itype != "action" else f"action ({action_t})",
+                    "traits": traits_v, "desc": desc,
+                    "img": icon_url(item.get("img", ""), itype),
+                })
+
+            elif itype == "spellcastingEntry":
+                entry_id = item.get("_id", "")
+                isys     = item.get("system") or {}
+                trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
+                ctype    = isys.get("prepared",  {}).get("value", "") if isinstance(isys.get("prepared"),  dict) else ""
+                dc_node  = isys.get("spelldc") or {}
+                dc       = dc_node.get("dc")    if isinstance(dc_node, dict) else None
+                atk      = dc_node.get("value") if isinstance(dc_node, dict) else None
+                slots    = {}
+                for slot_key, slot_data in (isys.get("slots") or {}).items():
+                    if isinstance(slot_data, dict):
+                        rn = slot_key.replace("slot", "")
+                        if rn.isdigit():
+                            smax = _int(slot_data.get("max", 0))
+                            if smax:
+                                slots[_int(rn)] = {"value": _int(slot_data.get("value", 0)), "max": smax}
+                spell_entries[entry_id] = {
+                    "name": item.get("name", ""), "tradition": trad, "type": ctype,
+                    "dc": dc, "attack": atk, "spells": [], "slots": slots,
+                    "img": icon_url(item.get("img", ""), itype),
+                }
+
+            elif itype == "spell":
+                isys     = item.get("system") or {}
+                rank_val = isys.get("level", {}).get("value", "?") if isinstance(isys.get("level"), dict) else isys.get("level", "?")
+                if isinstance(isys.get("rank"), dict):
+                    rank_val = isys["rank"].get("value", rank_val)
+                traits_v  = isys.get("traits", {}).get("value", []) if isinstance(isys.get("traits"), dict) else []
+                location  = isys.get("location") or {}
+                entry_id  = location.get("value", "") if isinstance(location, dict) else ""
+                desc_node = isys.get("description") or {}
+                desc = html_to_wikitext(desc_node.get("value", "") if isinstance(desc_node, dict) else "")
+                spell_obj = {"name": item.get("name", ""), "rank": rank_val,
+                             "traits": traits_v, "desc": desc, "entry_id": entry_id,
+                             "img": icon_url(item.get("img", ""), "spell")}
+                if entry_id and entry_id in spell_entries:
+                    spell_entries[entry_id]["spells"].append(spell_obj)
+                else:
+                    spells.append(spell_obj)
+
+        for entry in spell_entries.values():
+            entry["spells"].sort(key=lambda s: (_int(s["rank"], 99) if str(s["rank"]).isdigit() else 99, s["name"]))
+
+        return {
+            "name": actor.get("name"), "id": actor_id, "portrait": portrait,
+            "level": level, "size": size_label,
+            "hp": hp_val, "hp_max": hp_max, "hp_temp": hp_temp,
+            "ac": ac,
+            "perception": perc_total, "perception_rank": perc_rank,
+            "speed": speed_val, "other_speeds": other_speeds,
+            "senses": senses, "immunities": immunities,
+            "weaknesses": weaknesses, "resistances": resistances,
+            "conditions": conditions,
+            "fortitude": fort_total, "fortitude_rank": fort_rank,
+            "reflex":    ref_total,  "reflex_rank":    ref_rank,
+            "will":      will_total, "will_rank":      will_rank,
+            "abilities": abilities,
+            "skills": skills,
+            "hero_points": hero_pts,
+            "focus": f"{focus_val}/{focus_max}" if focus_max else None,
+            "languages": lang_list,
+            "currency": currency,
+            "bulk_current": bulk_current, "bulk_enc": bulk_enc, "bulk_max": bulk_max,
+            "invest_val": invest_val, "invest_max": invest_max,
+            "keyability":  self._get_detail_field(details, "keyability"),
+            "xp":          self._get_detail_field(details, "xp"),
+            "deity":       self._get_detail_field(details, "deity"),
+            "age":         self._get_detail_field(details, "age"),
+            "gender":      self._get_detail_field(details, "gender"),
+            "pronouns":    str(pronouns) if pronouns else "",
+            "height":      self._get_detail_field(details, "height"),
+            "weight":      self._get_detail_field(details, "weight"),
+            "ethnicity":   self._get_detail_field(details, "ethnicity"),
+            "nationality": self._get_detail_field(details, "nationality"),
+            "appearance":  html_to_wikitext(bio.get("appearance", "")),
+            "backstory":   html_to_wikitext(bio.get("backstory",  "")),
+            "attitude": attitude, "edicts": edicts, "anathema": anathema,
+            "campaign_notes": campaign_notes,
+            "items": items, "feats": feats,
+            "spell_entries": list(spell_entries.values()),
+            "orphan_spells": spells,
+        }
+
+    # ── Wiki rendering ────────────────────────────────────────────────────
+
+    def _fmt_prof(self, rank: int) -> str:
+        p = PROFICIENCY_MAP.get(_int(rank), PROFICIENCY_MAP[0])
+        return f"{{{{color|{p['color']}|'''{p['name']}'''}}}}"
+
+    def _fmt_save(self, total: int, rank: int) -> str:
+        return f"{fmt_mod(total)} ({self._fmt_prof(rank)})"
+
+    # ── Section generators ────────────────────────────────────────────────
+
+    def _section_details(self, char: dict) -> str:
+        lines = []
+
+        lines.append("== Details ==")
+        for itype, label in [("ancestry","Ancestry"),("heritage","Heritage"),
+                              ("background","Background"),("class","Class")]:
+            found = next((i for i in char["items"] if i.get("type") == itype), None)
+            if found:
+                img    = icon_url(found.get("img", ""), itype)
+                icon_s = wiki_img(img, 20, found["name"]) + " " if img else ""
+                lines.append(f"* '''{label}:''' {icon_s}{found['name']}")
+        for key, label in [("keyability","Key Ability"),("deity","Deity"),
+                            ("xp","XP"),("hero_points","Hero Points"),
+                            ("focus","Focus Points"),("languages","Languages")]:
+            val = char.get(key)
+            if key == "languages" and val:
+                val = ", ".join(str(l) for l in val)
+            elif key == "keyability" and val:
+                val = str(val).upper()
+            if val:
+                lines.append(f"* '''{label}:''' {val}")
+        lines.append("")
+
+        phys = [(k, char.get(fk)) for k, fk in [
+            ("Age","age"),("Pronouns","pronouns"),("Height","height"),
+            ("Weight","weight"),("Ethnicity","ethnicity"),("Nationality","nationality"),
+        ] if char.get(fk)]
+        if phys:
+            lines.append("== Identity ==")
+            for k, v in phys:
+                lines.append(f"* '''{k}:''' {v}")
+            lines.append("")
+
+        beliefs = [(k, char.get(fk)) for k, fk in [
+            ("Attitude","attitude"),("Edicts","edicts"),("Anathema","anathema"),
+        ] if char.get(fk)]
+        if beliefs:
+            lines.append("== Personality & Beliefs ==")
+            for k, v in beliefs:
+                lines.append(f"; '''{k}'''")
+                lines.append(f": {v}")
+            lines.append("")
+
+        if char.get("appearance"):
+            lines.append(f"== Appearance ==\n{char['appearance']}\n")
+        if char.get("backstory"):
+            lines.append(f"== Biography ==\n{char['backstory']}\n")
+        if char.get("campaign_notes"):
+            lines.append(f"== Campaign Notes ==\n{char['campaign_notes']}\n")
+
+        return "\n".join(lines)
+
+    def _section_defense(self, char: dict) -> str:
+        hp_str = f"{char['hp']}/{char['hp_max']}"
+        if char.get("hp_temp"):
+            hp_str += f" (+{char['hp_temp']} temp)"
+        speed_parts = [f"{char['speed']} ft. (land)"]
+        for sp in char.get("other_speeds", []):
+            speed_parts.append(f"{sp['value']} ft. ({sp['type']})")
+
+        lines = [
+            f"* '''HP:''' {hp_str}",
+            f"* '''AC:''' {char['ac']}",
+            f"* '''Perception:''' {fmt_mod(char['perception'])} ({self._fmt_prof(char['perception_rank'])})",
+            f"* '''Speed:''' {', '.join(speed_parts)}",
+            f"* '''Fortitude:''' {self._fmt_save(char['fortitude'], char['fortitude_rank'])}",
+            f"* '''Reflex:''' {self._fmt_save(char['reflex'], char['reflex_rank'])}",
+            f"* '''Will:''' {self._fmt_save(char['will'], char['will_rank'])}",
+        ]
+        if char.get("senses"):
+            lines.append(f"* '''Senses:''' {', '.join(char['senses'])}")
+        if char.get("immunities"):
+            lines.append(f"* '''Immunities:''' {', '.join(char['immunities'])}")
+        if char.get("weaknesses"):
+            lines.append(f"* '''Weaknesses:''' {', '.join(char['weaknesses'])}")
+        if char.get("resistances"):
+            lines.append(f"* '''Resistances:''' {', '.join(char['resistances'])}")
+        if char.get("conditions"):
+            cond_parts = [f"{c['name']} {c['value']}" if c.get("value") else c["name"]
+                          for c in char["conditions"]]
+            lines.append(f"* '''Active Conditions:''' {', '.join(cond_parts)}")
+        return "\n".join(lines)
+
+    def _section_abilities(self, char: dict) -> str:
+        ab = char["abilities"]
+        AB = {"str":"STR","dex":"DEX","con":"CON","int":"INT","wis":"WIS","cha":"CHA"}
+        return (
+            '{| class="wikitable" style="text-align:center; width:100%;"\n'
+            "|-\n"
+            "! " + " !! ".join(AB.values()) + "\n"
+            "|-\n"
+            "| " + " || ".join(fmt_mod(ab[k]) for k in AB) + "\n"
+            "|}"
+        )
+
+    def _section_skills(self, char: dict) -> str:
+        lines = [
+            '{| class="wikitable sortable" style="width:100%;"',
+            "! Skill !! Modifier !! Proficiency",
+        ]
+        for name, data in sorted(char["skills"].items()):
+            lines.append(f"|-\n| {name} || {fmt_mod(data['total'])} || {self._fmt_prof(data['rank'])}")
+        lines.append("|}")
+        return "\n".join(lines)
+
+    def _section_wealth(self, char: dict) -> str:
+        cur = char["currency"]
+        coin_parts = [f"{cur[c]} {c.upper()}" for c in ("pp","gp","sp","cp") if cur[c]]
+        coin_str   = ", ".join(coin_parts) if coin_parts else "None"
+        # Coin total in gp: pp=10, gp=1, sp=0.1, cp=0.01
+        coin_gp = cur["pp"] * 10 + cur["gp"] + cur["sp"] / 10 + cur["cp"] / 100
+
+        # Sum item prices for all physical non-coin inventory items
+        DENOM_TO_GP = {"pp": 10.0, "gp": 1.0, "sp": 0.1, "cp": 0.01}
+        PHYSICAL = {"weapon","armor","shield","consumable","ammo",
+                    "equipment","treasure","backpack","kit"}
+        item_gp = 0.0
+        for item in char.get("items", []):
+            if item.get("type") not in PHYSICAL:
+                continue
+            s    = item.get("system") or {}
+            qty  = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+            praw = s.get("price") if isinstance(s, dict) else None
+            if not isinstance(praw, dict):
+                continue
+            pval = praw.get("value") or {}
+            per  = _int(praw.get("per", 1) or 1)
+            if not isinstance(pval, dict) or per < 1:
+                continue
+            unit_gp = sum(DENOM_TO_GP[d] * _int(pval.get(d, 0))
+                          for d in DENOM_TO_GP if pval.get(d))
+            item_gp += unit_gp * qty / per
+
+        total_gp  = coin_gp + item_gp
+        total_str = f"{total_gp:g} gp"
+        bulk_cur = char.get("bulk_current", 0)
+        bulk_enc = char.get("bulk_enc", 0)
+        bulk_max = char.get("bulk_max", 0)
+        bulk_str = f"{bulk_cur}"
+        if bulk_enc:
+            bulk_str += f" / {bulk_enc} enc / {bulk_max} max"
+        invest_str = f"{char['invest_val']}/{char['invest_max']}" if char.get("invest_max") else "—"
+        return (
+            '{| class="wikitable"\n'
+            "! Coin !! Total Value !! Bulk !! Invested\n"
+            "|-\n"
+            f"| {coin_str} || {total_str} || {bulk_str} || {invest_str}\n"
+            "|}"
+        )
+
+    def _section_feats(self, char: dict) -> str:
+        if not char["feats"]:
+            return ""
+        GROUP_ORDER  = ["class-feature","ancestry-feature","heritage","background",
+                        "feat","archetype","action"]
+        GROUP_LABELS = {
+            "class-feature":"Class Features","ancestry-feature":"Ancestry Features",
+            "heritage":"Heritage","background":"Background Features",
+            "feat":"Feats","archetype":"Archetype Feats","action":"Actions",
+        }
+        groups: dict[str, list] = {}
+        for feat in char["feats"]:
+            groups.setdefault(feat["type"].split(" ")[0], []).append(feat)
+
+        lines = []
+        for gk in GROUP_ORDER + [k for k in groups if k not in GROUP_ORDER]:
+            gfeats = groups.get(gk, [])
+            if not gfeats:
+                continue
+            label = GROUP_LABELS.get(gk, gk.replace("-"," ").title())
+            lines.append(f"====={label}=====")
+            for feat in sorted(gfeats, key=lambda f: f["name"]):
+                icon_s = wiki_img(feat["img"], 20, feat["name"]) + " " if feat.get("img") else ""
+                trait_s = (" <small>(" + ", ".join(feat["traits"]) + ")</small>") if feat["traits"] else ""
+                lines.append(f"; {icon_s}'''{feat['name']}'''{trait_s}")
+                if feat["desc"]:
+                    lines.append(f": {feat['desc']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _section_inventory(self, items: list) -> str:
+        PHYSICAL = {"weapon","armor","shield","consumable","ammo",
+                    "equipment","treasure","backpack","kit"}
+        physical     = [i for i in items if i.get("type") in PHYSICAL]
+        item_map     = {i["_id"]: i for i in physical if "_id" in i}
+        cont_contents: dict[str, list] = {}
+        top: dict[str, list] = {t: [] for t in PHYSICAL}
+
+        for item in physical:
+            sys_data = item.get("system") or {}
+            cid      = sys_data.get("containerId") if isinstance(sys_data, dict) else None
+            if cid and cid in item_map:
+                cont_contents.setdefault(cid, []).append(item)
+            else:
+                top.setdefault(item.get("type"), []).append(item)
+
+        SECTIONS = [
+            ("weapon","Weapons"),("armor","Armor & Shields"),("shield",""),
+            ("consumable","Consumables"),("ammo","Ammunition"),
+            ("equipment","Equipment"),("backpack","Bags & Storage"),
+            ("treasure","Treasure & Currency"),("kit","Kits"),
+        ]
+        lines = []
+        shown = set()
+        for itype, heading in SECTIONS:
+            if not heading or itype in shown:
+                continue
+            group = top.get(itype, [])
+            if itype == "armor":
+                group = group + top.get("shield", [])
+                shown.add("shield")
+            shown.add(itype)
+            if not group:
+                continue
+
+            lines.append(f"====={heading}=====")
+            lines.append('{| class="wikitable" style="width:100%;"')
+            lines.append("! !! Item !! Qty !! Bulk !! Level !! Price")
+            for item in sorted(group, key=lambda x: x.get("name", "")):
+                s     = item.get("system") or {}
+                name  = item.get("name", "Unknown")
+                qty   = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+                bulk  = (s.get("bulk", {}).get("value", "—") if isinstance(s.get("bulk"), dict)
+                         else (s.get("bulk") or "—"))
+                lvl   = (s.get("level", {}).get("value", "—") if isinstance(s.get("level"), dict)
+                         else (s.get("level") or "—"))
+                pnode = s.get("price", {}).get("value", {}) if isinstance(s.get("price"), dict) else {}
+                price = ", ".join(f"{pnode[c]} {c}" for c in ("pp","gp","sp","cp")
+                                  if isinstance(pnode, dict) and pnode.get(c)) or "—"
+                img   = icon_url(item.get("img", ""), itype)
+                lines.append("|-")
+                lines.append(f"| {wiki_img(img, 24, name)} || [[{name}]] || {qty} || {bulk} || {lvl} || {price}")
+                if itype == "backpack" and item.get("_id") in cont_contents:
+                    lines.append("|-")
+                    lines.append('| colspan="6" |')
+                    lines.extend(self._render_container_tree(item["_id"], cont_contents))
+            lines.append("|}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _render_container_tree(self, cid: str, cont: dict, depth: int = 1,
+                               visited: set = None) -> list:
+        if visited is None:
+            visited = set()
+        lines = []
+        for item in cont.get(cid, []):
+            s     = item.get("system") or {}
+            name  = item.get("name", "Unknown")
+            qty   = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+            qty_s = f" ×{qty}" if qty > 1 else ""
+            img   = icon_url(item.get("img", ""), item.get("type", ""))
+            icon_s = wiki_img(img, 16, name) + " " if img else ""
+            bullet = "*" * depth
+            if item.get("type") == "backpack":
+                lines.append(f"{bullet} {icon_s}'''{name}'''")
+                child_id = item.get("_id")
+                if child_id and child_id not in visited:
+                    visited.add(child_id)
+                    lines.extend(self._render_container_tree(child_id, cont, depth + 1, visited))
+            else:
+                lines.append(f"{bullet} {icon_s}{name}{qty_s}")
+        return lines
+
+    def _section_spells(self, char: dict) -> str:
+        entries = char.get("spell_entries", [])
+        orphans = char.get("orphan_spells", [])
+        if not entries and not orphans:
+            return ""
+
+        lines = []
+        for entry in entries:
+            trad  = f" ({entry['tradition'].title()})" if entry["tradition"] else ""
+            ctype = f" — {entry['type'].title()}"      if entry["type"]      else ""
+            lines.append(f"====={entry['name']}{trad}{ctype}=====")
+            if entry.get("dc") or entry.get("attack"):
+                dc_s  = f"DC {entry['dc']}"                    if entry.get("dc")     else ""
+                atk_s = f"Attack {fmt_mod(entry['attack'])}"   if entry.get("attack") else ""
+                lines.append("; " + " | ".join(x for x in [dc_s, atk_s] if x))
+            if entry["spells"]:
+                current_rank = None
+                for spell in entry["spells"]:
+                    if spell["rank"] != current_rank:
+                        current_rank = spell["rank"]
+                        rl = f"Rank {current_rank}" if str(current_rank).isdigit() else str(current_rank)
+                        slot_info = ""
+                        if str(current_rank).isdigit():
+                            slot = entry.get("slots", {}).get(_int(current_rank))
+                            if slot:
+                                slot_info = f" <small>({slot['value']}/{slot['max']} slots)</small>"
+                        lines.append(f"\n'''{rl}'''{slot_info}")
+                    icon_s  = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
+                    trait_s = (" <small>[" + ", ".join(spell["traits"]) + "]</small>") if spell["traits"] else ""
+                    lines.append(f"* {icon_s}[[{spell['name']}]]{trait_s}")
+            lines.append("")
+
+        if orphans:
+            lines.append("=====Other Spells=====")
+            for spell in sorted(orphans, key=lambda s: (str(s["rank"]), s["name"])):
+                icon_s = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
+                lines.append(f"* {icon_s}[[{spell['name']}]]")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _parse_npc(self, actor: dict) -> dict:
+        """
+        Parse a PF2e NPC actor. NPCs have a simpler schema than PCs —
+        stats are largely pre-computed and stored directly as flat values.
+        """
+        system  = actor.get("system") or {}
+        details = system.get("details") or {}
+        attrs   = system.get("attributes") or {}
+
+        actor_id  = actor.get("_id")
+        raw_items = self._get_actor_items(actor_id)
+        items     = [enrich_item(i, self.compendium) for i in raw_items]
+
+        # ── Core stats — NPCs store final values directly ──────────────────
+        hp_node  = attrs.get("hp") or {}
+        hp_max   = _int(hp_node.get("max", hp_node.get("value", 0)) if isinstance(hp_node, dict) else 0)
+        hp_val   = _int(hp_node.get("value", hp_max) if isinstance(hp_node, dict) else hp_max)
+        hp_temp  = _int(hp_node.get("temp", 0) if isinstance(hp_node, dict) else 0)
+
+        ac_node  = attrs.get("ac") or {}
+        ac_val   = _int(ac_node.get("value", 10) if isinstance(ac_node, dict) else (ac_node or 10))
+
+        perc_node = attrs.get("perception") or {}
+        perc_val  = _int(perc_node.get("value", 0) if isinstance(perc_node, dict) else (perc_node or 0))
+        perc_mod  = perc_node.get("mod", perc_val) if isinstance(perc_node, dict) else perc_val
+
+        speed_node  = attrs.get("speed") or {}
+        speed_val   = _int(speed_node.get("value") or speed_node.get("total", 25)
+                           if isinstance(speed_node, dict) else (speed_node or 25))
+        other_speeds = [{"type": sp["type"].title(), "value": _int(sp["value"])}
+                        for sp in (speed_node.get("otherSpeeds", [])
+                                   if isinstance(speed_node, dict) else [])
+                        if isinstance(sp, dict) and sp.get("type") and sp.get("value")]
+
+        # ── Ability modifiers — stored as flat mods on NPCs ────────────────
+        abilities = {}
+        for ab in ("str", "dex", "con", "int", "wis", "cha"):
+            node = (system.get("abilities") or {}).get(ab) or {}
+            mod  = node.get("mod", node.get("value", 0)) if isinstance(node, dict) else _int(node)
+            abilities[ab] = _int(mod)
+
+        # ── Saves — stored as flat {value, mod} on NPCs ────────────────────
+        saves_raw = system.get("saves") or {}
+        saves = {}
+        for slug, label in (("fortitude","Fortitude"),("reflex","Reflex"),("will","Will")):
+            node = saves_raw.get(slug) or {}
+            val  = _int(node.get("value", node.get("totalModifier", 0)) if isinstance(node, dict) else node)
+            saves[slug] = {"label": label, "value": val}
+
+        # ── Skills ────────────────────────────────────────────────────────
+        skills_raw = system.get("skills") or {}
+        skills = {}
+        for key, data in skills_raw.items():
+            if not isinstance(data, dict):
+                continue
+            label = data.get("label", key.replace("-"," ").title())
+            val   = _int(data.get("value", data.get("totalModifier", 0)))
+            skills[label] = val
+
+        # ── Traits / type / alignment ──────────────────────────────────────
+        traits_node = system.get("traits") or {}
+        trait_list  = traits_node.get("value", []) if isinstance(traits_node, dict) else []
+        size_raw    = traits_node.get("size") or {}
+        size_val    = size_raw.get("value", "med") if isinstance(size_raw, dict) else (size_raw or "med")
+        SIZE_LABELS = {"tiny":"Tiny","sm":"Small","med":"Medium",
+                       "lg":"Large","huge":"Huge","grg":"Gargantuan"}
+        size_label  = SIZE_LABELS.get(str(size_val).lower(), str(size_val).title())
+        alignment   = (system.get("details") or {}).get("alignment", {})
+        if isinstance(alignment, dict):
+            alignment = alignment.get("value", "")
+
+        # ── Senses / IWR ──────────────────────────────────────────────────
+        senses = []
+        for s in (perc_node.get("senses", []) if isinstance(perc_node, dict) else []):
+            if isinstance(s, dict):
+                stype = s.get("type", "")
+                label = stype.replace("-"," ").title()
+                if s.get("acuity") and s["acuity"] != "precise":
+                    label += f" ({s['acuity']})"
+                if s.get("range"):
+                    label += f" {s['range']} ft."
+                if label:
+                    senses.append(label)
+
+        def _parse_iwr(raw):
+            out = []
+            for entry in (raw if isinstance(raw, list) else []):
+                if isinstance(entry, dict):
+                    etype = entry.get("type", "")
+                    if not etype:
+                        continue
+                    label = etype.replace("-"," ").title()
+                    if isinstance(entry.get("value"), (int, float)) and entry["value"]:
+                        label += f" {_int(entry['value'])}"
+                    out.append(label)
+                elif isinstance(entry, str):
+                    out.append(entry.replace("-"," ").title())
+            return out
+
+        immunities  = _parse_iwr(attrs.get("immunities",  []))
+        weaknesses  = _parse_iwr(attrs.get("weaknesses",  []))
+        resistances = _parse_iwr(attrs.get("resistances", []))
+
+        # ── Languages ─────────────────────────────────────────────────────
+        lang_f    = traits_node.get("languages") or {}
+        lang_list = lang_f.get("value", []) if isinstance(lang_f, dict) else (
+            lang_f if isinstance(lang_f, list) else [])
+
+        # ── Description / flavour ─────────────────────────────────────────
+        pub_notes  = html_to_wikitext(details.get("publicNotes",  details.get("notes", "")))
+        priv_notes = html_to_wikitext(details.get("privateNotes", ""))
+        blurb      = html_to_wikitext(details.get("blurb",        ""))
+        creature_type = details.get("creatureType", details.get("type", ""))
+        level_node = details.get("level") or {}
+        level      = _int(level_node.get("value", 0) if isinstance(level_node, dict) else (level_node or 0))
+
+        # ── Actions / abilities / spells from items ────────────────────────
+        actions, spells, spell_entries = [], [], {}
+        for item in items:
+            itype = item.get("type", "")
+
+            if itype in ("melee", "ranged", "action", "feat"):
+                isys     = item.get("system") or {}
+                traits_v = isys.get("traits", {}).get("value", []) if isinstance(isys.get("traits"), dict) else []
+                desc_node = isys.get("description") or {}
+                desc = html_to_wikitext(desc_node.get("value", "") if isinstance(desc_node, dict) else "")
+                # Attack bonus for melee/ranged
+                attack_bonus = None
+                if itype in ("melee", "ranged"):
+                    atk_node = isys.get("attack", isys.get("bonus", {}))
+                    if isinstance(atk_node, dict):
+                        attack_bonus = atk_node.get("value")
+                    elif isinstance(atk_node, (int, float)):
+                        attack_bonus = _int(atk_node)
+                    # Damage
+                dmg_rolls = []
+                for droll in (isys.get("damageRolls") or {}).values() if isinstance(isys.get("damageRolls"), dict) else []:
+                    if isinstance(droll, dict):
+                        formula = droll.get("damage", "")
+                        dtype   = droll.get("damageType", "")
+                        if formula:
+                            dmg_rolls.append(f"{formula} {dtype}".strip())
+                actions.append({
+                    "name":    item.get("name", ""),
+                    "type":    itype,
+                    "traits":  traits_v,
+                    "attack":  attack_bonus,
+                    "damage":  dmg_rolls,
+                    "desc":    desc,
+                    "img":     icon_url(item.get("img", ""), itype),
+                })
+
+            elif itype == "spellcastingEntry":
+                entry_id = item.get("_id", "")
+                isys     = item.get("system") or {}
+                trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
+                ctype    = isys.get("prepared", {}).get("value", "")  if isinstance(isys.get("prepared"),  dict) else ""
+                dc_node  = isys.get("spelldc") or {}
+                dc       = dc_node.get("dc")    if isinstance(dc_node, dict) else None
+                atk      = dc_node.get("value") if isinstance(dc_node, dict) else None
+                spell_entries[entry_id] = {
+                    "name": item.get("name", ""), "tradition": trad, "type": ctype,
+                    "dc": dc, "attack": atk, "spells": [], "slots": {},
+                    "img": icon_url(item.get("img", ""), itype),
+                }
+
+            elif itype == "spell":
+                isys     = item.get("system") or {}
+                rank_val = isys.get("level", {}).get("value", "?") if isinstance(isys.get("level"), dict) else isys.get("level", "?")
+                if isinstance(isys.get("rank"), dict):
+                    rank_val = isys["rank"].get("value", rank_val)
+                traits_v  = isys.get("traits", {}).get("value", []) if isinstance(isys.get("traits"), dict) else []
+                location  = isys.get("location") or {}
+                entry_id  = location.get("value", "") if isinstance(location, dict) else ""
+                desc_node = isys.get("description") or {}
+                desc = html_to_wikitext(desc_node.get("value", "") if isinstance(desc_node, dict) else "")
+                spell_obj = {"name": item.get("name",""), "rank": rank_val,
+                             "traits": traits_v, "desc": desc, "entry_id": entry_id,
+                             "img": icon_url(item.get("img",""), "spell")}
+                if entry_id and entry_id in spell_entries:
+                    spell_entries[entry_id]["spells"].append(spell_obj)
+                else:
+                    spells.append(spell_obj)
+
+        for entry in spell_entries.values():
+            entry["spells"].sort(key=lambda s: (_int(s["rank"], 99) if str(s["rank"]).isdigit() else 99, s["name"]))
+
+        return {
+            "name":         actor.get("name"),
+            "id":           actor_id,
+            "portrait":     icon_url(actor.get("img", ""), "character"),
+            "level":        level,
+            "size":         size_label,
+            "creature_type":creature_type,
+            "alignment":    alignment,
+            "traits":       trait_list,
+            "languages":    lang_list,
+            "hp":           hp_val,  "hp_max": hp_max, "hp_temp": hp_temp,
+            "ac":           ac_val,
+            "perception":   perc_val,
+            "speed":        speed_val, "other_speeds": other_speeds,
+            "senses":       senses,
+            "immunities":   immunities,
+            "weaknesses":   weaknesses,
+            "resistances":  resistances,
+            "abilities":    abilities,
+            "saves":        saves,
+            "skills":       skills,
+            "actions":      actions,
+            "spell_entries":list(spell_entries.values()),
+            "orphan_spells":spells,
+            "blurb":        blurb,
+            "pub_notes":    pub_notes,
+            "priv_notes":   priv_notes,
+            "items":        items,
+        }
+
+    def render_npc_page(self, npc: dict) -> str:
+        lines = [
+            f"= {npc['name']} =",
+            "",
+            "{{CharacterInfobox",
+            f"| name       = {npc['name']}",
+        ]
+        if npc["portrait"]:
+            lines.append(f"| portrait   = {npc['portrait']}")
+        lines += [
+            f"| level      = {npc['level']}",
+            f"| size       = {npc['size']}",
+        ]
+        if npc.get("creature_type"):
+            lines.append(f"| type       = {npc['creature_type']}")
+        if npc.get("alignment"):
+            lines.append(f"| alignment  = {npc['alignment']}")
+        if npc.get("traits"):
+            lines.append(f"| traits     = {', '.join(npc['traits'])}")
+        if npc.get("languages"):
+            lines.append(f"| languages  = {', '.join(str(l) for l in npc['languages'])}")
+        lines += ["}}", ""]
+
+        # ── Flavour text visible at top ────────────────────────────────────
+        if npc.get("blurb"):
+            lines += [f"''{npc['blurb']}''", ""]
+        if npc.get("pub_notes"):
+            lines += ["== Description ==", npc["pub_notes"], ""]
+
+        # GM notes (private)
+        if npc.get("priv_notes"):
+            lines.append(collapsible("GM Notes (Private)", npc["priv_notes"]))
+
+        lines += [
+            "",
+            f"''Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:NPCs]]",
+        ]
+        if npc.get("creature_type"):
+            lines.append(f"[[Category:{npc['creature_type'].title()}]]")
+        return "\n".join(lines)
+
+    # ── Full page renderer ────────────────────────────────────────────────
+
+    def render_character_page(self, char: dict) -> str:
+        ab     = char["abilities"]
+        ab_str = " | ".join(f"'''{k.upper()}''' {fmt_mod(v)}" for k, v in ab.items())
+        hp_str = f"{char['hp']}/{char['hp_max']}" + (f" (+{char['hp_temp']} temp)" if char.get("hp_temp") else "")
+        speed_parts = [f"{char['speed']} ft."] + [f"{sp['value']} ft. {sp['type']}" for sp in char.get("other_speeds", [])]
+
+        lines = [
+            f"= {char['name']} =",
+            "",
+            "{{CharacterInfobox",
+            f"| name        = {char['name']}",
+        ]
+        if char["portrait"]:
+            lines.append(f"| portrait    = {char['portrait']}")
+        lines += [
+            f"| level       = {char['level']}",
+            f"| size        = {char['size']}",
+            f"| hp          = {hp_str}",
+            f"| ac          = {char['ac']}",
+            f"| perception  = {fmt_mod(char['perception'])}",
+            f"| speed       = {', '.join(speed_parts)}",
+            f"| fortitude   = {fmt_mod(char['fortitude'])}",
+            f"| reflex      = {fmt_mod(char['reflex'])}",
+            f"| will        = {fmt_mod(char['will'])}",
+            f"| attributes  = {ab_str}",
+        ]
+        for key, tmpl in [("keyability","key_ability"),("deity","deity"),
+                          ("age","age"),("gender","gender"),("pronouns","pronouns"),
+                          ("hero_points","hero_points"),("focus","focus")]:
+            val = char.get(key)
+            if key == "keyability" and val:
+                val = str(val).upper()
+            if val is not None and val != "":
+                lines.append(f"| {tmpl:<12} = {val}")
+        if char.get("languages"):
+            lines.append(f"| languages   = {', '.join(str(l) for l in char['languages'])}")
+        if char.get("senses"):
+            lines.append(f"| senses      = {', '.join(char['senses'])}")
+        cur = char["currency"]
+        coin_parts = [f"{cur[c]} {c.upper()}" for c in ("pp","gp","sp","cp") if cur[c]]
+        if coin_parts:
+            lines.append(f"| wealth      = {', '.join(coin_parts)}")
+
+        # ── Combat record — last kill / last knocked unconscious ───────────
+        cr    = self.combat_record().get(char["id"]) or {}
+        def _fmt_cr(entry: dict | None) -> str:
+            """Format a combat record entry as 'Name (YYYY-MM-DD)'."""
+            if not entry or not entry.get("name"):
+                return ""
+            ts   = entry.get("ts", 0)
+            date = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else ""
+            return f"{entry['name']}" + (f" ({date})" if date else "")
+
+        last_kill    = _fmt_cr(cr.get("last_kill"))
+        last_downed  = _fmt_cr(cr.get("last_downed_by"))
+        if last_kill:
+            lines.append(f"| last_kill   = {last_kill}")
+        if last_downed:
+            lines.append(f"| last_downed = {last_downed}")
+
+        lines += ["}}", ""]
+
+        lines.append(self._section_details(char))
+
+        defense_content  = self._section_defense(char)
+        ability_content  = self._section_abilities(char)
+        skill_content    = self._section_skills(char)
+        wealth_content   = self._section_wealth(char)
+        feat_content     = self._section_feats(char)
+        inv_content      = self._section_inventory(char["items"])
+        spell_content    = self._section_spells(char)
+
+        lines.append(collapsible("⚔ Defense & Saves",     defense_content))
+        lines.append(collapsible("📊 Ability Scores",     ability_content))
+        lines.append(collapsible("🎓 Skills",             skill_content))
+        lines.append(collapsible("💰 Wealth & Carry",     wealth_content))
+        if feat_content:
+            lines.append(collapsible("✨ Feats & Features", feat_content))
+        if inv_content.strip():
+            lines.append(collapsible("🎒 Inventory",        inv_content))
+        if spell_content.strip():
+            lines.append(collapsible("🔮 Spellcasting",     spell_content))
+
+        lines += [
+            f"''Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Characters]]",
+        ]
+        return "\n".join(lines)
+
+    # ── Push / preview ────────────────────────────────────────────────────
+
+    _SYNC_LINE_RE = re.compile(r"^''Last synced:.*?''\n?", re.MULTILINE)
+
+    @staticmethod
+    def _comparable(markup: str) -> str:
+        """Strip the timestamp line so content diffs ignore it."""
+        return FullExporter._SYNC_LINE_RE.sub("", markup).strip()
+
+    def push_to_wiki(self, site, target_name: str | None = None, npcs: bool = False):
+        """Push characters or NPCs. Accepts a shared mwclient.Site instance."""
+        actors = self.get_all_npcs() if npcs else self.get_all_characters()
+        if target_name:
+            actors = [a for a in actors if a["name"].lower() == target_name.lower()]
+            if not actors:
+                kind = "NPC" if npcs else "character"
+                print(f"✗  No {kind} named '{target_name}' found.")
+                return
+
+        prefix  = "NPCs" if npcs else "Characters"
+        pushed = skipped = errors = 0
+
+        for actor in actors:
+            name = actor["name"]
+            try:
+                new_markup = (self.render_npc_page(actor)
+                              if npcs else self.render_character_page(actor))
+                page           = site.pages[f"{prefix}/{name}"]
+                current_markup = page.text()
+
+                if current_markup and (
+                    self._comparable(current_markup) == self._comparable(new_markup)
+                ):
+                    print(f"  –  Skipped (no changes): {name}")
+                    skipped += 1
+                    continue
+
+                page.edit(new_markup,
+                          summary=f"Auto-sync: PF2e {'NPC' if npcs else 'character'} exporter.")
+                status = "Created" if not current_markup else "Updated"
+                print(f"✓  {status}: {name}")
+                pushed += 1
+
+            except Exception as e:
+                print(f"✗  Error pushing {name}: {e}")
+                errors += 1
+
+        total = pushed + skipped + errors
+        print(f"\nDone — {total} processed: "
+              f"{pushed} pushed, {skipped} skipped (unchanged), {errors} errors.")
+
+    def preview(self, target_name: str | None = None, npcs: bool = False):
+        actors = self.get_all_npcs() if npcs else self.get_all_characters()
+        if target_name:
+            actors = [a for a in actors if a["name"].lower() == target_name.lower()]
+            if not actors:
+                kind = "NPC" if npcs else "character"
+                print(f"✗  No {kind} named '{target_name}' found.")
+                return
+        out_dir = Path("wiki_preview")
+        out_dir.mkdir(exist_ok=True)
+        for actor in actors:
+            markup   = self.render_npc_page(actor) if npcs else self.render_character_page(actor)
+            filename = out_dir / f"{'NPC_' if npcs else ''}{actor['name'].replace(' ','_').replace('/','_')}.wiki"
+            filename.write_text(markup, encoding="utf-8")
+            print(f"✓  Preview written: {filename}")
+
+    def close(self):
+        self.actors_db.close()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Session exporter
+# ════════════════════════════════════════════════════════════════════════════
+
+class SessionExporter:
+    """
+    Builds a wiki page for the daily session window (yesterday 04:00 → today 04:00).
+    Page title: Sessions/YYYYMMDD
+
+    No page is created if no meaningful activity (combats, kills, or loot) occurred.
+
+    Snapshot file: session_snapshots/snapshot_latest.json
+      Written after every run. The NEXT run diffs inventories to detect loot gained.
+      Archive copies saved as session_snapshots/snapshot_YYYYMMDD.json.
+    """
+
+    SNAPSHOT_DIR = Path("session_snapshots")
+    SESSION_HOUR = 4
+
+    def __init__(self, world_path: str, full_exporter: "FullExporter"):
+        self.world_path    = Path(world_path)
+        self.full_exporter = full_exporter
+        self.SNAPSHOT_DIR.mkdir(exist_ok=True)
+
+    def session_window(self) -> tuple[datetime, datetime]:
+        now = datetime.now()
+        end = now.replace(hour=self.SESSION_HOUR, minute=0, second=0, microsecond=0)
+        # Use hour comparison so that exactly 4:00:00 correctly closes the prior window
+        if now.hour < self.SESSION_HOUR:
+            end -= timedelta(days=1)
+        start = end - timedelta(days=1)
+        return start, end
+
+    def _read_combats(self) -> list[dict]:
+        combats_path = self.world_path / "data" / "combats"
+        if not combats_path.exists():
+            print("  ⚠  No combats database found — skipping combat data.")
+            return []
+
+        tmp      = tempfile.mkdtemp()
+        tmp_path = Path(tmp) / "combats"
+        combats: dict[str, dict] = {}
+        combatant_buckets: dict[str, list] = {}
+
+        try:
+            shutil.copytree(str(combats_path), str(tmp_path))
+            db = plyvel.DB(str(tmp_path))
+            with db:
+                for raw_key, raw_val in db:
+                    k     = raw_key.decode("utf-8", errors="replace")
+                    parts = k.split("!")
+                    if len(parts) < 3:
+                        continue
+                    collection = parts[1]
+                    if "combatants" in collection:
+                        id_part   = parts[2]
+                        combat_id = id_part.split(".")[0] if "." in id_part else id_part
+                        try:
+                            combatant = json.loads(raw_val)
+                            if isinstance(combatant, dict):
+                                combatant_buckets.setdefault(combat_id, []).append(combatant)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            combat    = json.loads(raw_val)
+                            combat_id = combat.get("_id", parts[2])
+                            if isinstance(combat, dict):
+                                combats[combat_id] = combat
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"  ⚠  Could not read combats database: {e}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        for combat_id, combat in combats.items():
+            combat["combatants"] = combatant_buckets.get(combat_id, [])
+
+        return list(combats.values())
+
+    def _filter_by_window(self, combats: list, start: datetime, end: datetime) -> list:
+        start_ms = start.timestamp() * 1000
+        end_ms   = end.timestamp()   * 1000
+        result   = []
+        for combat in combats:
+            stats   = combat.get("_stats") or {}
+            created = stats.get("createdTime") or stats.get("modifiedTime")
+            if created is None:
+                result.append(combat)
+            elif start_ms <= float(created) <= end_ms:
+                result.append(combat)
+        return result
+
+    def _extract_session_data(self, combats: list, all_chars: list) -> dict:
+        char_by_id = {c["id"]: c["name"] for c in all_chars if c.get("id")}
+
+        characters_present: set[str] = set()
+        enemies_killed:     list[dict] = []
+        seen_enemies:       set[str]  = set()
+
+        for combat in combats:
+            for combatant in combat.get("combatants", []):
+                actor_id = combatant.get("actorId", "")
+                token    = combatant.get("token") or {}
+                name     = combatant.get("name") or token.get("name") or "Unknown"
+                defeated = combatant.get("defeated", False)
+                hidden   = combatant.get("hidden", False)
+
+                if actor_id in char_by_id:
+                    characters_present.add(char_by_id[actor_id])
+                elif defeated and not hidden:
+                    key = name.strip().lower()
+                    if key not in seen_enemies:
+                        seen_enemies.add(key)
+                        img = icon_url(combatant.get("img") or token.get("img", ""), "character")
+                        enemies_killed.append({"name": name, "img": img})
+
+        return {
+            "characters_present": sorted(characters_present),
+            "enemies_killed":     enemies_killed,
+            "num_combats":        len(combats),
+        }
+
+    def _snapshot_path(self, label: str = "latest") -> Path:
+        return self.SNAPSHOT_DIR / f"snapshot_{label}.json"
+
+    def _save_snapshot(self, all_chars: list, date_label: str):
+        PHYSICAL = {"weapon","armor","shield","consumable","ammo",
+                    "equipment","treasure","backpack","kit"}
+        snapshot = {}
+        for char in all_chars:
+            items = {}
+            for item in char.get("items", []):
+                if item.get("type") not in PHYSICAL:
+                    continue
+                iid  = item.get("_id", "")
+                sys  = item.get("system") or {}
+                qty  = _int(sys.get("quantity", 1) if isinstance(sys, dict) else 1)
+                items[iid] = {
+                    "name": item.get("name", ""),
+                    "type": item.get("type", ""),
+                    "qty":  qty,
+                    "img":  item.get("img", ""),
+                }
+            snapshot[char["id"]] = {"name": char["name"], "items": items}
+
+        data    = {"timestamp": datetime.now().isoformat(), "characters": snapshot}
+        payload = json.dumps(data, indent=2)
+        self._snapshot_path("latest").write_text(payload, encoding="utf-8")
+        self._snapshot_path(date_label).write_text(payload, encoding="utf-8")
+        print(f"  Snapshot saved → {self._snapshot_path(date_label)}")
+
+        # Prune dated snapshots older than 30 days
+        cutoff = datetime.now().timestamp() - 30 * 86400
+        for f in self.SNAPSHOT_DIR.glob("snapshot_????????.json"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
+    def _compute_loot(self, all_chars: list) -> tuple[list[dict], list[dict]]:
+        """Return (gained, removed) item lists relative to the latest snapshot."""
+        snap_file = self._snapshot_path("latest")
+        if not snap_file.exists():
+            print("  ⚠  No previous snapshot — loot diff unavailable for first run.")
+            return [], []
+
+        try:
+            prev = json.loads(snap_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  ⚠  Could not read snapshot: {e}")
+            return [], []
+
+        prev_chars = prev.get("characters", {})
+        PHYSICAL   = {"weapon","armor","shield","consumable","ammo",
+                      "equipment","treasure","backpack","kit"}
+        gained  = []
+        removed = []
+
+        for char in all_chars:
+            char_id    = char["id"]
+            char_name  = char["name"]
+            prev_items = prev_chars.get(char_id, {}).get("items", {})
+            curr_ids   = set()
+
+            for item in char.get("items", []):
+                if item.get("type") not in PHYSICAL:
+                    continue
+                iid  = item.get("_id", "")
+                sys  = item.get("system") or {}
+                qty  = _int(sys.get("quantity", 1) if isinstance(sys, dict) else 1)
+                name = item.get("name", "Unknown")
+                img  = icon_url(item.get("img", ""), item.get("type", ""))
+                curr_ids.add(iid)
+
+                if iid not in prev_items:
+                    gained.append({"char": char_name, "name": name,
+                                   "qty": qty, "img": img, "type": item.get("type", "")})
+                else:
+                    delta = qty - prev_items[iid].get("qty", qty)
+                    if delta > 0:
+                        gained.append({"char": char_name, "name": name,
+                                       "qty": delta, "img": img, "type": item.get("type", "")})
+                    elif delta < 0:
+                        removed.append({"char": char_name, "name": name,
+                                        "qty": -delta, "img": img, "type": item.get("type", "")})
+
+            # Items in snapshot that are entirely gone from current inventory
+            for iid, prev_item in prev_items.items():
+                if iid not in curr_ids:
+                    removed.append({"char": char_name, "name": prev_item.get("name", "Unknown"),
+                                    "qty": prev_item.get("qty", 1), "img": "", "type": ""})
+
+        return gained, removed
+
+    def render_session_page(self, date_str: str, session_data: dict,
+                            loot: list, start: datetime, end: datetime,
+                            removed: list = None) -> str:
+        lines = [
+            f"= Session: {start.strftime('%B %d, %Y')} =",
+            "",
+            f"''Window: {start.strftime('%Y-%m-%d %H:%M')} → "
+            f"{end.strftime('%Y-%m-%d %H:%M')} | "
+            f"Encounters: {session_data['num_combats']}''",
+            "",
+        ]
+
+        lines.append("== Characters Present ==")
+        if session_data["characters_present"]:
+            for name in session_data["characters_present"]:
+                lines.append(f"* [[Characters/{name}|{name}]]")
+        else:
+            lines.append("* ''No player characters recorded in combat this session.''")
+        lines.append("")
+
+        lines.append("== Enemies Defeated ==")
+        if session_data["enemies_killed"]:
+            lines.append('{| class="wikitable" style="width:100%;"')
+            lines.append("! !! Enemy")
+            for enemy in sorted(session_data["enemies_killed"], key=lambda e: e["name"]):
+                icon_s = wiki_img(enemy["img"], 24, enemy["name"]) if enemy.get("img") else ""
+                lines += ["|-", f"| {icon_s} || {enemy['name']}"]
+            lines.append("|}")
+        else:
+            lines.append("* ''No enemies defeated this session.''")
+        lines.append("")
+
+        lines.append("== Loot Gained ==")
+        if loot:
+            lines.append('{| class="wikitable sortable" style="width:100%;"')
+            lines.append("! !! Item !! Qty !! Character")
+            for entry in sorted(loot, key=lambda x: (x["char"], x["name"])):
+                icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
+                lines += [
+                    "|-",
+                    f"| {icon_s} || [[{entry['name']}]] || {entry['qty']} "
+                    f"|| [[Characters/{entry['char']}|{entry['char']}]]",
+                ]
+            lines.append("|}")
+        else:
+            lines.append("* ''No new items recorded this session.''")
+        lines.append("")
+
+        if removed:
+            lines.append("== Items Spent / Removed ==")
+            lines.append('{| class="wikitable sortable" style="width:100%;"')
+            lines.append("! !! Item !! Qty !! Character")
+            for entry in sorted(removed, key=lambda x: (x["char"], x["name"])):
+                icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
+                lines += [
+                    "|-",
+                    f"| {icon_s} || {entry['name']} || {entry['qty']} "
+                    f"|| [[Characters/{entry['char']}|{entry['char']}]]",
+                ]
+            lines.append("|}")
+            lines.append("")
+
+        lines += [
+            f"''Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Sessions]]",
+            f"[[Category:Sessions {start.strftime('%Y')}]]",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _comparable(markup: str) -> str:
+        return re.sub(r"^''Generated:.*?''\n?", "", markup, flags=re.MULTILINE).strip()
+
+    def run(self, site, all_chars: list):
+        start, end = self.session_window()
+        date_str   = start.strftime("%Y%m%d")
+
+        print(f"\nSession window: {start.strftime('%Y-%m-%d %H:%M')} → "
+              f"{end.strftime('%Y-%m-%d %H:%M')} (page: Sessions/{date_str})")
+
+        all_combats     = self._read_combats()
+        session_combats = self._filter_by_window(all_combats, start, end)
+        print(f"  Combats in window: {len(session_combats)} / {len(all_combats)} total")
+
+        session_data = self._extract_session_data(session_combats, all_chars)
+        print(f"  Characters present: {len(session_data['characters_present'])}")
+        print(f"  Enemies defeated:   {len(session_data['enemies_killed'])}")
+
+        # Compute loot BEFORE saving snapshot so we diff against yesterday's state
+        loot, removed = self._compute_loot(all_chars)
+        print(f"  Loot items gained:  {len(loot)}")
+        print(f"  Items removed:      {len(removed)}")
+
+        # ── Skip page creation if no meaningful activity occurred ──────────
+        has_activity = (
+            len(session_data["characters_present"]) > 0 or
+            len(session_data["enemies_killed"])      > 0 or
+            len(loot)                                > 0
+        )
+        if not has_activity:
+            print(f"  –  No activity detected — skipping session page for {date_str}.")
+            # Still save snapshot so next run has an accurate baseline
+            self._save_snapshot(all_chars, date_str)
+            return
+
+        # Save snapshot for next run's diff
+        self._save_snapshot(all_chars, date_str)
+
+        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed)
+        page_title = f"Sessions/{date_str}"
+        page       = site.pages[page_title]
+        current    = page.text()
+
+        if current and self._comparable(current) == self._comparable(markup):
+            print(f"  –  Session page unchanged: {page_title}")
+        else:
+            page.edit(markup, summary=f"Auto-sync: Session log {date_str}")
+            action = "Updated" if current else "Created"
+            print(f"  ✓  {action}: {page_title}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Entry point
+# ════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Export PF2e characters, NPCs, and session logs to MediaWiki",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  Preview all PCs:                python full-exporter.py
+  Push all PCs:                   python full-exporter.py --push
+  Preview one PC:                 python full-exporter.py --char "Seraphina Voss"
+  Push one PC:                    python full-exporter.py --char "Seraphina Voss" --push
+  Preview all NPCs:               python full-exporter.py --npcs
+  Push all NPCs:                  python full-exporter.py --npcs --push
+  Push NPCs + session:            python full-exporter.py --npcs --push --session
+  Push PCs + session:             python full-exporter.py --push --session
+  Push PCs + NPCs + session:      python full-exporter.py --push --npcs --session
+  Debug raw data:                 python full-exporter.py --char "Name" --debug
+""")
+    parser.add_argument("--push",          action="store_true",
+                        help="Push to wiki (default: preview only)")
+    parser.add_argument("--char",          metavar="NAME",
+                        help="Single actor by name")
+    parser.add_argument("--npcs",          action="store_true",
+                        help="Include NPC export in this run")
+    parser.add_argument("--session",       action="store_true",
+                        help="Build and push today's session log (4am window)")
+    parser.add_argument("--debug",         action="store_true",
+                        help="Dump raw system data for --char")
+    parser.add_argument("--world",         default=WORLD_PATH,
+                        help="Foundry world path")
+    parser.add_argument("--data",          default=FOUNDRY_DATA,
+                        help="Foundry data root (for compendium packs)")
+    parser.add_argument("--no-compendium", action="store_true",
+                        help="Skip compendium enrichment (faster)")
+    args = parser.parse_args()
+
+    exporter = FullExporter(args.world,
+                            data_root=("" if args.no_compendium else args.data))
+    try:
+        if args.debug:
+            if not args.char:
+                print("--debug requires --char NAME")
+                sys.exit(1)
+            exporter.debug_dump(args.char)
+
+        elif args.push:
+            # Single login — shared across all push operations this run
+            site = make_site()
+
+            # Always push PCs (filtered to --char if specified)
+            print("\n── Player Characters ──────────────────────────────────")
+            exporter.push_to_wiki(site, target_name=args.char, npcs=False)
+
+            # Optionally also push NPCs in the same run
+            if args.npcs:
+                print("\n── NPCs ────────────────────────────────────────────")
+                exporter.push_to_wiki(site, target_name=args.char, npcs=True)
+
+            # Optionally push session log
+            if args.session:
+                all_chars = exporter.get_all_characters()
+                sess = SessionExporter(args.world, exporter)
+                sess.run(site, all_chars)
+
+        else:
+            # Preview mode
+            if args.session:
+                print("Note: --session only runs in --push mode. Previewing instead.")
+            exporter.preview(target_name=args.char, npcs=args.npcs)
+
+    finally:
+        exporter.close()

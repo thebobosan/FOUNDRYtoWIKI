@@ -1,0 +1,25 @@
+2026/06/10-10:11:50.854388 7fad1effd6c0 Recovering log #226
+2026/06/10-10:11:50.855065 7fad1effd6c0 Level-0 table #228: started
+2026/06/10-10:11:50.856850 7fad1effd6c0 Level-0 table #228: 8392 bytes OK
+2026/06/10-10:11:50.860116 7fad1effd6c0 Delete type=3 #224
+2026/06/10-10:11:50.860164 7fad1effd6c0 Delete type=0 #226
+2026/06/10-10:28:32.510948 7fad1d7fa6c0 Level-0 table #231: started
+2026/06/10-10:28:32.512631 7fad1d7fa6c0 Level-0 table #231: 4564 bytes OK
+2026/06/10-10:28:32.513629 7fad1d7fa6c0 Delete type=0 #229
+2026/06/10-10:28:32.536350 7fad1d7fa6c0 Manual compaction at level-0 from '!settings!1E5KkmzBdrOMOVng' @ 72057594037927935 : 1 .. '!settings!ylqu4QDBBqPI2jrj' @ 0 : 0; will stop at '!settings!VM67Pp3xgczQ5w3P' @ 2172 : 1
+2026/06/10-10:28:32.536357 7fad1d7fa6c0 Compacting 3@0 + 0@1 files
+2026/06/10-10:28:32.537711 7fad1d7fa6c0 Generated table #232@0: 5 keys, 4641 bytes
+2026/06/10-10:28:32.537728 7fad1d7fa6c0 Compacted 3@0 + 0@1 files => 4641 bytes
+2026/06/10-10:28:32.538597 7fad1d7fa6c0 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/06/10-10:28:32.538757 7fad1d7fa6c0 Delete type=2 #225
+2026/06/10-10:28:32.538890 7fad1d7fa6c0 Delete type=2 #231
+2026/06/10-10:28:32.538959 7fad1d7fa6c0 Delete type=2 #228
+2026/06/10-10:28:32.544393 7fad1d7fa6c0 Manual compaction at level-0 from '!settings!VM67Pp3xgczQ5w3P' @ 2172 : 1 .. '!settings!ylqu4QDBBqPI2jrj' @ 0 : 0; will stop at (end)
+2026/06/10-10:28:32.549136 7fad1d7fa6c0 Manual compaction at level-1 from '!settings!1E5KkmzBdrOMOVng' @ 72057594037927935 : 1 .. '!settings!ylqu4QDBBqPI2jrj' @ 0 : 0; will stop at '!settings!gTcGUF7i1IEmYKOR' @ 2258 : 1
+2026/06/10-10:28:32.549145 7fad1d7fa6c0 Compacting 1@1 + 1@2 files
+2026/06/10-10:28:32.551706 7fad1d7fa6c0 Generated table #233@1: 56 keys, 50822 bytes
+2026/06/10-10:28:32.551728 7fad1d7fa6c0 Compacted 1@1 + 1@2 files => 50822 bytes
+2026/06/10-10:28:32.552813 7fad1d7fa6c0 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/06/10-10:28:32.552927 7fad1d7fa6c0 Delete type=2 #221
+2026/06/10-10:28:32.553006 7fad1d7fa6c0 Delete type=2 #232
+2026/06/10-10:28:32.553108 7fad1d7fa6c0 Manual compaction at level-1 from '!settings!gTcGUF7i1IEmYKOR' @ 2258 : 1 .. '!settings!ylqu4QDBBqPI2jrj' @ 0 : 0; will stop at (end)

@@ -1,0 +1,23 @@
+2026/06/10-10:11:50.745177 7fad1e7fc6c0 Recovering log #197
+2026/06/10-10:11:50.745673 7fad1e7fc6c0 Level-0 table #199: started
+2026/06/10-10:11:50.747202 7fad1e7fc6c0 Level-0 table #199: 1527 bytes OK
+2026/06/10-10:11:50.751114 7fad1e7fc6c0 Delete type=0 #197
+2026/06/10-10:11:50.751181 7fad1e7fc6c0 Delete type=3 #196
+2026/06/10-10:28:32.464329 7fad1d7fa6c0 Level-0 table #202: started
+2026/06/10-10:28:32.464781 7fad1d7fa6c0 Level-0 table #202: 0 bytes OK
+2026/06/10-10:28:32.467056 7fad1d7fa6c0 Delete type=0 #200
+2026/06/10-10:28:32.474482 7fad1d7fa6c0 Manual compaction at level-0 from '!macros!00cOXy7raUjoaRs2' @ 72057594037927935 : 1 .. '!macros!zqBucctzr5S6YJA1' @ 0 : 0; will stop at '!macros!uODj3c3FAZLbSQB6' @ 204 : 1
+2026/06/10-10:28:32.474491 7fad1d7fa6c0 Compacting 1@0 + 0@1 files
+2026/06/10-10:28:32.476186 7fad1d7fa6c0 Generated table #203@0: 10 keys, 1527 bytes
+2026/06/10-10:28:32.476207 7fad1d7fa6c0 Compacted 1@0 + 0@1 files => 1527 bytes
+2026/06/10-10:28:32.478359 7fad1d7fa6c0 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/06/10-10:28:32.478494 7fad1d7fa6c0 Delete type=2 #199
+2026/06/10-10:28:32.482229 7fad1d7fa6c0 Manual compaction at level-0 from '!macros!uODj3c3FAZLbSQB6' @ 204 : 1 .. '!macros!zqBucctzr5S6YJA1' @ 0 : 0; will stop at (end)
+2026/06/10-10:28:32.486213 7fad1d7fa6c0 Manual compaction at level-1 from '!macros!00cOXy7raUjoaRs2' @ 72057594037927935 : 1 .. '!macros!zqBucctzr5S6YJA1' @ 0 : 0; will stop at '!macros!uODj3c3FAZLbSQB6' @ 204 : 1
+2026/06/10-10:28:32.486222 7fad1d7fa6c0 Compacting 1@1 + 1@2 files
+2026/06/10-10:28:32.488936 7fad1d7fa6c0 Generated table #204@1: 122 keys, 56354 bytes
+2026/06/10-10:28:32.488957 7fad1d7fa6c0 Compacted 1@1 + 1@2 files => 56354 bytes
+2026/06/10-10:28:32.490718 7fad1d7fa6c0 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/06/10-10:28:32.490959 7fad1d7fa6c0 Delete type=2 #193
+2026/06/10-10:28:32.491078 7fad1d7fa6c0 Delete type=2 #203
+2026/06/10-10:28:32.504029 7fad1d7fa6c0 Manual compaction at level-1 from '!macros!uODj3c3FAZLbSQB6' @ 204 : 1 .. '!macros!zqBucctzr5S6YJA1' @ 0 : 0; will stop at (end)

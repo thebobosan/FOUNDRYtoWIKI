@@ -1,0 +1,96 @@
+<div class="infobox" style="border: 1px solid #a2a9b1; background-color: #f8f9fa; color: #202122; margin: 0.5em 0 0.5em 1em; padding: 0.5em; float: right; clear: right; width: 290px; font-size: 88%; line-height: 1.5em; font-family: sans-serif; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 4px;">
+<table style="width: 100%; background: transparent; border-spacing: 0 4px;">
+<tr>
+<th colspan="2" style="font-size: 140%; text-align: center; background-color: #5c1d24; color: white; padding: 6px; border-radius: 3px;">{{{name|{{PAGENAME}}}}}</th>
+</tr>
+
+{{#if:{{{portrait|}}}|
+<tr>
+<td colspan="2" style="text-align: center; padding: 5px;">
+<div class="infobox-portrait">{{{portrait}}}#.webp</div>
+</td>
+</tr>
+}}
+
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0; width: 38%;">Level</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{level|—}}}</td>
+</tr>
+
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">Size</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{size|—}}}</td>
+</tr>
+
+{{#if:{{{key_ability|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">Key Ability</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{key_ability}}}</td>
+</tr>
+}}
+
+{{#if:{{{hero_points|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">Hero Points</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{hero_points}}}</td>
+</tr>
+}}
+
+{{#if:{{{hp|}}}{{{ac|}}}{{{fortitude|}}}{{{reflex|}}}{{{will|}}}{{{perception|}}}{{{speed|}}}|
+<tr>
+<th colspan="2" style="background-color: #5c1d24; color: white; text-align: center; font-weight: bold; padding: 4px; border-radius: 2px; font-size: 95%;">Defenses & Combat</th>
+</tr>
+}}
+
+{{#if:{{{hp|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">HP</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{hp}}}</td>
+</tr>
+}}
+
+{{#if:{{{ac|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">AC</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{ac}}}</td>
+</tr>
+}}
+
+{{#if:{{{fortitude|}}}{{{reflex|}}}{{{will|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0; vertical-align: top;">Saving Throws</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;"><b>Fort</b> {{{fortitude|—}}}, <b>Ref</b> {{{reflex|—}}}, <b>Will</b> {{{will|—}}}</td>
+</tr>
+}}
+
+{{#if:{{{perception|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">Perception</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{perception}}}</td>
+</tr>
+}}
+
+{{#if:{{{speed|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0;">Speed</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0;">{{{speed}}}</td>
+</tr>
+}}
+
+{{#if:{{{attributes|}}}|
+<tr>
+<th colspan="2" style="background-color: #cbd5e1; color: #1e293b; text-align: center; font-weight: bold; padding: 3px; border-radius: 2px; font-size: 90%;">Attributes</th>
+</tr>
+<tr>
+<td colspan="2" style="text-align: center; padding: 6px; font-size: 85%; border-bottom: 1px solid #eaecf0; background-color: #f1f5f9;">{{{attributes}}}</td>
+</tr>
+}}
+
+{{#if:{{{languages|}}}|
+<tr>
+<th style="text-align: left; padding: 4px; border-bottom: 1px solid #eaecf0; vertical-align: top;">Languages</th>
+<td style="padding: 4px; border-bottom: 1px solid #eaecf0; font-size: 90%;">{{{languages}}}</td>
+</tr>
+}}
+</table>
+</div>
