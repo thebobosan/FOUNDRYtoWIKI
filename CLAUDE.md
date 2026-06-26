@@ -6,6 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file Python script (`full-export.py`) that reads a FoundryVTT PF2e world's LevelDB databases, computes character stats via a custom math engine, and pushes formatted MediaWiki pages to a private wiki.
 
+## Running tests
+
+```bash
+# Run full test suite against monday-alkenstar world data
+python test_export.py
+
+# Run with rendered wiki markup printed per actor
+python test_export.py --verbose
+
+# Test a single character
+python test_export.py --char "Name"
+
+# Also test NPC parsing/rendering
+python test_export.py --npcs
+```
+
+`test_export.py` loads `full-export.py` via `importlib.util` (the hyphen prevents normal import). It stubs out `mwclient` so no wiki connection is needed. It uses `monday-alkenstar/` as its local world fixture and sets `FOUNDRY_DATA=""` to skip compendium enrichment. Tests cover field presence, sanity ranges on stats, and that `render_character_page` / `render_npc_page` / `_section_wealth` produce valid markup.
+
 ## Running the script
 
 ```bash
@@ -33,7 +51,7 @@ python full-export.py --no-compendium
 
 Dependencies: `plyvel`, `mwclient` (install via pip). Requires access to the Foundry LevelDB files on disk.
 
-Wiki password is read from the `WIKI_PASSWORD` environment variable (falls back to a hardcoded default — see security notes below).
+Wiki password is read from the `WIKI_PASSWORD` environment variable (falls back to a hardcoded default in source).
 
 ## Architecture
 
@@ -86,8 +104,6 @@ Item price is stored in `system.price.value` (a dict of `pp/gp/sp/cp`) and `syst
 - `FOUNDRY_URL` — base URL for resolving icon paths
 - `WIKI_URL` / `WIKI_USER` — MediaWiki connection details
 - `COMPENDIUM_PACKS` — list of pf2e pack names to index
-
-**Security**: `WIKI_PASSWORD` has a hardcoded fallback in source — should be replaced with a hard failure requiring the env var.
 
 ## Helper patterns used throughout
 
