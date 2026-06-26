@@ -20,6 +20,7 @@ import mwclient
 import sys
 import os
 import re
+import html
 import shutil
 import tempfile
 from pathlib import Path
@@ -257,7 +258,7 @@ def collapsible(title: str, content: str, collapsed: bool = True) -> str:
     state = " mw-collapsed" if collapsed else ""
     return (
         f'<div class="toccolours mw-collapsible{state}">\n'
-        f"<b>{title}</b>\n"
+        f"<b>{html.escape(title)}</b>\n"
         f'<div class="mw-collapsible-content">\n'
         f"{content}\n"
         f"</div>\n"
@@ -438,9 +439,7 @@ def _read_boost_slot(slot):
     if isinstance(val, str):
         return val
     if isinstance(val, list):
-        if len(val) == 6:
-            return None          # all-6 placeholder with no selection = skip
-        return val               # short specific list
+        return None              # any list without a selected key = unrecorded choice, skip
     return None
 
 
@@ -543,13 +542,16 @@ class FullExporter:
 
         # Build actor id → name map from actors DB
         name_by_actor: dict[str, str] = {}
-        for _, raw in self.actors_db.iterator():
-            try:
-                a = json.loads(raw)
-            except Exception:
-                continue
-            if isinstance(a, dict) and a.get("_id"):
-                name_by_actor[a["_id"]] = a.get("name", "Unknown")
+        with self.actors_db.iterator() as it:
+            for key, raw in it:
+                if not key.startswith(b"!actors!"):
+                    continue
+                try:
+                    a = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(a, dict) and a.get("_id"):
+                    name_by_actor[a["_id"]] = a.get("name", "Unknown")
 
         # Load all messages
         tmp      = tempfile.mkdtemp()
@@ -605,8 +607,10 @@ class FullExporter:
 
             # Source B: context.target on attack/damage roll messages.
             # Captures all attacks regardless of how damage is applied.
+            # Skip healing rolls (e.g. healing spells, Aid) to avoid crediting
+            # a healer as the one who downed a PC.
             ctx = pf.get("context") or {}
-            if isinstance(ctx, dict):
+            if isinstance(ctx, dict) and not ctx.get("isHealing"):
                 target = ctx.get("target") or pf.get("target") or {}
                 if isinstance(target, dict):
                     victim_id = target.get("actor", "")
@@ -691,112 +695,114 @@ class FullExporter:
     def _get_actor_items(self, actor_id: str) -> list:
         prefix = f"!actors.items!{actor_id}.".encode()
         items  = []
-        for key, value in self.actors_db.iterator():
-            if key.startswith(prefix):
-                try:
-                    item = json.loads(value)
-                    if isinstance(item, dict):
-                        items.append(item)
-                except Exception as e:
-                    print(f"  ⚠  Failed to parse item {key!r}: {e}")
+        with self.actors_db.iterator() as it:
+            for key, value in it:
+                if key.startswith(prefix):
+                    try:
+                        item = json.loads(value)
+                        if isinstance(item, dict):
+                            items.append(item)
+                    except Exception as e:
+                        print(f"  ⚠  Failed to parse item {key!r}: {e}")
         return items
 
     def get_all_characters(self) -> list:
         chars = []
-        for _, value in self.actors_db.iterator():
-            try:
-                actor = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if isinstance(actor, dict) and actor.get("type") == "character":
-                chars.append(self._parse_character(actor))
+        with self.actors_db.iterator() as it:
+            for _, value in it:
+                try:
+                    actor = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(actor, dict) and actor.get("type") == "character":
+                    chars.append(self._parse_character(actor))
         return chars
 
     def get_all_npcs(self) -> list:
         npcs = []
-        for _, value in self.actors_db.iterator():
-            try:
-                actor = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if isinstance(actor, dict) and actor.get("type") == "npc":
-                npcs.append(self._parse_npc(actor))
+        with self.actors_db.iterator() as it:
+            for _, value in it:
+                try:
+                    actor = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(actor, dict) and actor.get("type") == "npc":
+                    npcs.append(self._parse_npc(actor))
         return npcs
 
     def debug_dump(self, name: str):
         """Dump raw system fields for a named actor, including full item data."""
-        for _, value in self.actors_db.iterator():
-            try:
-                actor = json.loads(value)
-            except Exception:
-                continue
-            if not isinstance(actor, dict):
-                continue
-            if actor.get("name", "").lower() != name.lower():
-                continue
+        with self.actors_db.iterator() as it:
+            for _, value in it:
+                try:
+                    actor = json.loads(value)
+                except Exception:
+                    continue
+                if not isinstance(actor, dict):
+                    continue
+                if actor.get("type") not in ("character", "npc"):
+                    continue
+                if actor.get("name", "").lower() != name.lower():
+                    continue
 
-            system = actor.get("system", {})
-            keys_to_dump = [
-                "abilities", "saves", "skills",
-                ("attributes", "ac"),
-                ("attributes", "perception"),
-                ("attributes", "hp"),
-                ("attributes", "speed"),
-                "proficiencies",
-                "currency",
-                ("build", "attributes"),
-            ]
-            print(f"\n{'='*60}")
-            print(f"DEBUG DUMP: {actor.get('name')} (type={actor.get('type')})")
-            print('='*60)
-            for key in keys_to_dump:
-                if isinstance(key, tuple):
-                    val = system
-                    label = ".".join(key)
-                    for k in key:
-                        val = val.get(k, {}) if isinstance(val, dict) else {}
-                else:
-                    val = system.get(key, {})
-                    label = key
-                print(f"\nsystem.{label}:")
-                print(json.dumps(val, indent=2, default=str)[:2000])
+                system = actor.get("system", {})
+                keys_to_dump = [
+                    "abilities", "saves", "skills",
+                    ("attributes", "ac"),
+                    ("attributes", "perception"),
+                    ("attributes", "hp"),
+                    ("attributes", "speed"),
+                    "proficiencies",
+                    "currency",
+                    ("build", "attributes"),
+                ]
+                print(f"\n{'='*60}")
+                print(f"DEBUG DUMP: {actor.get('name')} (type={actor.get('type')})")
+                print('='*60)
+                for key in keys_to_dump:
+                    if isinstance(key, tuple):
+                        val = system
+                        label = ".".join(key)
+                        for k in key:
+                            val = val.get(k, {}) if isinstance(val, dict) else {}
+                    else:
+                        val = system.get(key, {})
+                        label = key
+                    print(f"\nsystem.{label}:")
+                    print(json.dumps(val, indent=2, default=str)[:2000])
 
-            items = self._get_actor_items(actor.get("_id", ""))
-            print(f"\nTotal items: {len(items)}")
+                items = self._get_actor_items(actor.get("_id", ""))
+                print(f"\nTotal items: {len(items)}")
 
-            # Show full system data for items critical to stat calculation
-            for itype in ("class", "ancestry", "background", "heritage"):
-                found = [i for i in items if i.get("type") == itype]
-                for item in found:
-                    isys = item.get("system") or {}
-                    print(f"\n── {itype.upper()} item: {item.get('name','?')} ──")
-                    # Show boosts/flaws/keyAbility/savingThrows/defenses/perception
-                    for field in ("boosts","flaws","keyAbility","savingThrows",
-                                  "defenses","perception","trainedSkills",
-                                  "trainedLore","hp","rules"):
-                        fval = isys.get(field)
-                        if fval is not None:
-                            dumped = json.dumps(fval, indent=2, default=str)
-                            # Truncate rules to keep output readable
-                            if field == "rules" and len(dumped) > 1500:
-                                dumped = dumped[:1500] + "\n  … (truncated)"
-                            print(f"  .{field}: {dumped}")
+                for itype in ("class", "ancestry", "background", "heritage"):
+                    found = [i for i in items if i.get("type") == itype]
+                    for item in found:
+                        isys = item.get("system") or {}
+                        print(f"\n── {itype.upper()} item: {item.get('name','?')} ──")
+                        for field in ("boosts","flaws","keyAbility","savingThrows",
+                                      "defenses","perception","trainedSkills",
+                                      "trainedLore","hp","rules"):
+                            fval = isys.get(field)
+                            if fval is not None:
+                                dumped = json.dumps(fval, indent=2, default=str)
+                                if field == "rules" and len(dumped) > 1500:
+                                    dumped = dumped[:1500] + "\n  … (truncated)"
+                                print(f"  .{field}: {dumped}")
 
-            # Show treasure items — reveals coin storage format
-            treasure_items = [i for i in items if i.get("type") == "treasure"]
-            if treasure_items:
-                print(f"\n── TREASURE items ({len(treasure_items)}) ──")
-                for item in treasure_items[:12]:
-                    isys = item.get("system") or {}
-                    print(f"  {item.get('name','?')!r}")
-                    for field in ("quantity", "denomination", "stackGroup",
-                                  "price", "value", "weight", "bulk"):
-                        fval = isys.get(field)
-                        if fval is not None:
-                            print(f"    .{field}: {json.dumps(fval, default=str)}")
-                if len(treasure_items) > 12:
-                    print(f"  … and {len(treasure_items)-12} more")
-            return
+                treasure_items = [i for i in items if i.get("type") == "treasure"]
+                if treasure_items:
+                    print(f"\n── TREASURE items ({len(treasure_items)}) ──")
+                    for item in treasure_items[:12]:
+                        isys = item.get("system") or {}
+                        print(f"  {item.get('name','?')!r}")
+                        for field in ("quantity", "denomination", "stackGroup",
+                                      "price", "value", "weight", "bulk"):
+                            fval = isys.get(field)
+                            if fval is not None:
+                                print(f"    .{field}: {json.dumps(fval, default=str)}")
+                    if len(treasure_items) > 12:
+                        print(f"  … and {len(treasure_items)-12} more")
+                return
 
         print(f"✗  Actor '{name}' not found.")
 
@@ -890,9 +896,14 @@ class FullExporter:
                 else:
                     ka_val = ka or []
                 if isinstance(ka_val, str):
-                    ka_val = [ka_val]
-                if slug in ka_val:
-                    score = score + 2 if score < 18 else score + 1
+                    # Single-option class (e.g. Wizard/Oracle) — apply directly
+                    if ka_val == slug:
+                        score = score + 2 if score < 18 else score + 1
+                elif isinstance(ka_val, list):
+                    # Multi-option class — use the player's actual choice from the actor
+                    actor_key = (system.get("details") or {}).get("keyability", "")
+                    if actor_key and actor_key == slug:
+                        score = score + 2 if score < 18 else score + 1
 
             elif itype == "heritage":
                 b = isys.get("boost") or isys.get("boosts")
@@ -902,6 +913,24 @@ class FullExporter:
                     score = score + 2 if score < 18 else score + 1
 
         return (score - 10) // 2
+
+    # ── Item helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_coin_item(item: dict) -> bool:
+        """True when a treasure item represents actual currency (1 coin per unit, single denomination)."""
+        if item.get("type") != "treasure":
+            return False
+        price = (item.get("system") or {}).get("price") or {}
+        if not isinstance(price, dict):
+            return False
+        if _int(price.get("per", 1)) != 1:
+            return False
+        pval = price.get("value") or {}
+        if not isinstance(pval, dict):
+            return False
+        coin_denoms = {k for k in ("pp", "gp", "sp", "cp") if pval.get(k)}
+        return len(coin_denoms) == 1 and all(_int(pval[d]) == 1 for d in coin_denoms)
 
     # ── Proficiency rank helpers ──────────────────────────────────────────
 
@@ -1060,16 +1089,16 @@ class FullExporter:
         saves = system.get("saves") or {}
         node  = saves.get(slug, {})
         rank  = self._rank_from_node(node)
-        if rank:
-            return rank
 
         # 2. Rules-based rank (ActiveEffectLike rules on class/class-feature items)
-        #    This correctly handles level-gated proficiency upgrades like
-        #    "Expert Fortitude at level 3" without hardcoding class progressions.
+        #    Merge with stored rank — level-gated upgrades (e.g. Expert Fortitude at
+        #    level 7) may be stored as rules while the actor node still shows the
+        #    initial Trained rank.
         rr = rules_ranks or {}
         rr_key = f"saves.{slug}"
-        if rr.get(rr_key, 0):
-            return rr[rr_key]
+        rank = max(rank, rr.get(rr_key, 0))
+        if rank:
+            return rank
 
         # 3. Static fields on the class item (initial rank before upgrades)
         for item in items:
@@ -1089,19 +1118,18 @@ class FullExporter:
 
     def _perception_rank(self, system: dict, items: list = None,
                           rules_ranks: dict = None) -> int:
-        # 1. Pre-computed rank on the actor
+        # 1. Pre-computed rank on the actor (two possible storage paths)
         perc = system.get("perception") or {}
         rank = self._rank_from_node(perc)
-        if rank:
-            return rank
         perc2 = (system.get("attributes") or {}).get("perception") or {}
-        rank = self._rank_from_node(perc2)
+        rank = max(rank, self._rank_from_node(perc2))
+
+        # 2. Merge with rules-based rank so level-gated upgrades are not silenced
+        #    by a stored base rank.
+        rr = rules_ranks or {}
+        rank = max(rank, rr.get("perception", 0))
         if rank:
             return rank
-        # 2. Rules-based rank
-        rr = rules_ranks or {}
-        if rr.get("perception", 0):
-            return rr["perception"]
         # 3. Static field on the class item: system.perception (int or {value:N})
         for item in (items or []):
             if item.get("type") == "class":
@@ -1233,7 +1261,7 @@ class FullExporter:
         if not isinstance(skill_data, dict):
             return ability_mod, 0
 
-        rank = self._rank_from_node(skill_data.get("rank", 0))
+        rank = self._rank_from_node(skill_data)
 
         if skill_data.get("value") is not None:
             return _int(skill_data["value"]), rank
@@ -1376,7 +1404,7 @@ class FullExporter:
         # item whose price is expressed in pp/gp/sp/cp.
         # e.g. "Silver Pieces": quantity=5, price={value:{sp:1}, per:1}
         for item in items:
-            if item.get("type") != "treasure":
+            if not self._is_coin_item(item):
                 continue
             isys  = item.get("system") or {}
             qty   = isys.get("quantity", 1)
@@ -1403,20 +1431,6 @@ class FullExporter:
         # PF2e rule of 1 bulk per 1,000 coins; they must not use the standard
         # qty × bulk formula or the total becomes wildly inflated.
         # Encumbered threshold = STR_mod + 5; max = STR_mod + 10.
-        def _is_coin_item(item: dict) -> bool:
-            if item.get("type") != "treasure":
-                return False
-            price = (item.get("system") or {}).get("price") or {}
-            if not isinstance(price, dict):
-                return False
-            if _int(price.get("per", 1)) != 1:
-                return False
-            pval = price.get("value") or {}
-            if not isinstance(pval, dict):
-                return False
-            coin_denoms = {k for k in ("pp", "gp", "sp", "cp") if pval.get(k)}
-            return len(coin_denoms) == 1 and all(_int(pval[d]) == 1 for d in coin_denoms)
-
         def _item_bulk(item: dict) -> float:
             isys = item.get("system") or {}
             bn   = isys.get("bulk")
@@ -1437,7 +1451,7 @@ class FullExporter:
             isys = i.get("system") or {}
             qty_raw = isys.get("quantity", 1)
             qty = _int(qty_raw.get("value", 1) if isinstance(qty_raw, dict) else qty_raw)
-            if _is_coin_item(i):
+            if self._is_coin_item(i):
                 coin_total += qty
             else:
                 noncoin_bulk += _item_bulk(i) * qty
@@ -1744,8 +1758,11 @@ class FullExporter:
         for item in char.get("items", []):
             if item.get("type") not in PHYSICAL:
                 continue
+            if self._is_coin_item(item):
+                continue
             s    = item.get("system") or {}
-            qty  = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+            q    = s.get("quantity", 1) if isinstance(s, dict) else 1
+            qty  = _int(q["value"] if isinstance(q, dict) else q)
             praw = s.get("price") if isinstance(s, dict) else None
             if not isinstance(praw, dict):
                 continue
@@ -1845,7 +1862,8 @@ class FullExporter:
             for item in sorted(group, key=lambda x: x.get("name", "")):
                 s     = item.get("system") or {}
                 name  = item.get("name", "Unknown")
-                qty   = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+                q_raw = s.get("quantity", 1) if isinstance(s, dict) else 1
+                qty   = _int(q_raw["value"] if isinstance(q_raw, dict) else q_raw)
                 bulk  = (s.get("bulk", {}).get("value", "—") if isinstance(s.get("bulk"), dict)
                          else (s.get("bulk") or "—"))
                 lvl   = (s.get("level", {}).get("value", "—") if isinstance(s.get("level"), dict)
@@ -1921,7 +1939,7 @@ class FullExporter:
 
         if orphans:
             lines.append("=====Other Spells=====")
-            for spell in sorted(orphans, key=lambda s: (str(s["rank"]), s["name"])):
+            for spell in sorted(orphans, key=lambda s: (_int(s["rank"], 99), s["name"])):
                 icon_s = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
                 lines.append(f"* {icon_s}[[{spell['name']}]]")
             lines.append("")
@@ -2280,7 +2298,7 @@ class FullExporter:
 
     # ── Push / preview ────────────────────────────────────────────────────
 
-    _SYNC_LINE_RE = re.compile(r"^''Last synced:.*?''\n?", re.MULTILINE)
+    _SYNC_LINE_RE = re.compile(r"''Last synced:.*?''\n?\Z")
 
     @staticmethod
     def _comparable(markup: str) -> str:
@@ -2748,7 +2766,7 @@ Examples:
             # Optionally also push NPCs in the same run
             if args.npcs:
                 print("\n── NPCs ────────────────────────────────────────────")
-                exporter.push_to_wiki(site, target_name=args.char, npcs=True)
+                exporter.push_to_wiki(site, target_name=None, npcs=True)
 
             # Optionally push session log
             if args.session:
