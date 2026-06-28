@@ -1508,7 +1508,11 @@ class FullExporter:
                 s = item.get("system") or {}
                 lore_rank = _int(s.get("rank", {}).get("value", 0)
                                  if isinstance(s.get("rank"), dict) else s.get("rank", 0))
-                prof = (level + lore_rank * 2) if lore_rank > 0 else 0
+                # A Lore item only exists if the character is at least Trained;
+                # rank 0 means the item was created without an explicit rank written back.
+                if lore_rank == 0:
+                    lore_rank = 1
+                prof = level + lore_rank * 2
                 skills[lore_name] = {"total": prof + abilities["int"], "rank": lore_rank}
 
         res         = system.get("resources") or {}
