@@ -1614,7 +1614,10 @@ class FullExporter:
             "invest_val": invest_val, "invest_max": invest_max,
             "keyability":  self._get_detail_field(details, "keyability"),
             "xp":          self._get_detail_field(details, "xp"),
-            "deity":       self._get_detail_field(details, "deity"),
+            "deity":       next((i["name"] for i in items if i.get("type") == "deity"), None)
+                           or self._get_detail_field(details, "deity"),
+            "deity_img":   icon_url(next((i.get("img","") for i in items
+                                          if i.get("type") == "deity"), ""), "deity"),
             "age":         self._get_detail_field(details, "age"),
             "gender":      self._get_detail_field(details, "gender"),
             "pronouns":    str(pronouns) if pronouns else "",
@@ -1653,8 +1656,12 @@ class FullExporter:
                 img    = icon_url(found.get("img", ""), itype)
                 icon_s = wiki_img(img, 20, found["name"]) + " " if img else ""
                 lines.append(f"* '''{label}:''' {icon_s}{found['name']}")
-        for key, label in [("keyability","Key Ability"),("deity","Deity"),
-                            ("xp","XP"),("hero_points","Hero Points"),
+        if char.get("deity"):
+            img    = char.get("deity_img", "")
+            icon_s = wiki_img(img, 20, char["deity"]) + " " if img else ""
+            lines.append(f"* '''Deity:''' {icon_s}{char['deity']}")
+        for key, label in [("keyability","Key Ability"),("xp","XP"),
+                            ("hero_points","Hero Points"),
                             ("focus","Focus Points"),("languages","Languages")]:
             val = char.get(key)
             if key == "languages" and val:
