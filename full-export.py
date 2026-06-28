@@ -42,7 +42,7 @@ WIKI_PASSWORD = os.environ.get("WIKI_PASSWORD", "942u09g4u09g4u0g2u0guu0gu0gwu0g
 COMPENDIUM_PACKS = [
     "equipment", "spells", "feats", "actions",
     "ancestries", "backgrounds", "classes", "heritages",
-    "class-features", "ancestry-features",
+    "class-features", "ancestry-features", "deities",
 ]
 
 PROFICIENCY_MAP = {
