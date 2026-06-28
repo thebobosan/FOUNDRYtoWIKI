@@ -1475,9 +1475,16 @@ class FullExporter:
         if isinstance(pronouns, dict):
             pronouns = pronouns.get("value", "")
         attitude       = html_to_wikitext(bio.get("attitude",      ""))
+        beliefs        = html_to_wikitext(bio.get("beliefs",       ""))
         edicts         = html_to_wikitext(bio.get("edicts",        ""))
         anathema       = html_to_wikitext(bio.get("anathema",      ""))
+        likes          = html_to_wikitext(bio.get("likes",         ""))
+        dislikes       = html_to_wikitext(bio.get("dislikes",      ""))
+        catchphrases   = html_to_wikitext(bio.get("catchphrases",  ""))
         campaign_notes = html_to_wikitext(bio.get("campaignNotes", bio.get("notes", "")))
+        allies         = html_to_wikitext(bio.get("allies",        ""))
+        enemies        = html_to_wikitext(bio.get("enemies",       ""))
+        organizations  = html_to_wikitext(bio.get("organizations", ""))
 
         skills_raw = system.get("skills") or {}
         SKILL_ABILITY = self.SKILL_ABILITY
@@ -1627,8 +1634,10 @@ class FullExporter:
             "nationality": self._get_detail_field(details, "nationality"),
             "appearance":  html_to_wikitext(bio.get("appearance", "")),
             "backstory":   html_to_wikitext(bio.get("backstory",  "")),
-            "attitude": attitude, "edicts": edicts, "anathema": anathema,
-            "campaign_notes": campaign_notes,
+            "attitude": attitude, "beliefs": beliefs, "edicts": edicts, "anathema": anathema,
+            "likes": likes, "dislikes": dislikes, "catchphrases": catchphrases,
+            "campaign_notes": campaign_notes, "allies": allies,
+            "enemies": enemies, "organizations": organizations,
             "items": items, "feats": feats,
             "spell_entries": list(spell_entries.values()),
             "orphan_spells": spells,
@@ -1682,12 +1691,18 @@ class FullExporter:
                 lines.append(f"* '''{k}:''' {v}")
             lines.append("")
 
-        beliefs = [(k, char.get(fk)) for k, fk in [
-            ("Attitude","attitude"),("Edicts","edicts"),("Anathema","anathema"),
+        personality = [(k, char.get(fk)) for k, fk in [
+            ("Attitude",     "attitude"),
+            ("Beliefs",      "beliefs"),
+            ("Edicts",       "edicts"),
+            ("Anathema",     "anathema"),
+            ("Likes",        "likes"),
+            ("Dislikes",     "dislikes"),
+            ("Catchphrases", "catchphrases"),
         ] if char.get(fk)]
-        if beliefs:
+        if personality:
             lines.append("== Personality & Beliefs ==")
-            for k, v in beliefs:
+            for k, v in personality:
                 lines.append(f"; '''{k}'''")
                 lines.append(f": {v}")
             lines.append("")
@@ -1698,6 +1713,18 @@ class FullExporter:
             lines.append(f"== Biography ==\n{char['backstory']}\n")
         if char.get("campaign_notes"):
             lines.append(f"== Campaign Notes ==\n{char['campaign_notes']}\n")
+
+        campaign = [(k, char.get(fk)) for k, fk in [
+            ("Allies",        "allies"),
+            ("Enemies",       "enemies"),
+            ("Organizations", "organizations"),
+        ] if char.get(fk)]
+        if campaign:
+            lines.append("== Campaign Connections ==")
+            for k, v in campaign:
+                lines.append(f"; '''{k}'''")
+                lines.append(f": {v}")
+            lines.append("")
 
         return "\n".join(lines)
 
