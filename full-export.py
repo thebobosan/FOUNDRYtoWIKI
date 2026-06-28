@@ -23,6 +23,7 @@ import re
 import html
 import shutil
 import tempfile
+import math
 from pathlib import Path
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
@@ -2336,7 +2337,7 @@ class FullExporter:
 
     # ── Push / preview ────────────────────────────────────────────────────
 
-    _SYNC_LINE_RE = re.compile(r"''Last synced:.*?''\n?\Z")
+    _SYNC_LINE_RE = re.compile(r"^''Last synced:.*?''\n?", re.MULTILINE)
 
     @staticmethod
     def _comparable(markup: str) -> str:
@@ -2429,6 +2430,108 @@ class SessionExporter:
         self.world_path    = Path(world_path)
         self.full_exporter = full_exporter
         self.SNAPSHOT_DIR.mkdir(exist_ok=True)
+
+    def _read_ingame_date(self) -> str | None:
+        """
+        Read the current in-game date from the Seasons and Stars calendar.
+
+        S&S epoch-based mode (no calendar.worldTime config): worldTime=0 maps to the
+        Gregorian world-creation date (pf2e.worldClock.worldCreatedOn) expressed as a
+        Vux calendar date with the same year number and day-of-year position. The epoch
+        offset in Vux days is:
+            epoch_offset = (worldCreatedOn_year - currentYear) * days_per_year
+                           + worldCreatedOn_day_of_year   [1-indexed]
+
+        Verified empirically: core.time=-834407816, worldCreatedOn=2025-08-12
+        → epoch_offset = (2025-1994)*304 + 224 = 9648
+        → adjusted_days = -9658 + 9648 = -10
+        → year 1993, day 294 → 21 Baruus, Cycle 1993 PE ✓
+        """
+        settings_path = self.world_path / "data" / "settings"
+        if not settings_path.exists():
+            return None
+
+        tmp = tempfile.mkdtemp()
+        tmp_path = Path(tmp) / "settings"
+        world_time: int | None = None
+        cal: dict | None = None
+        world_created_on: str | None = None
+
+        try:
+            shutil.copytree(str(settings_path), str(tmp_path))
+            db = plyvel.DB(str(tmp_path))
+            with db:
+                for _, raw_val in db:
+                    try:
+                        val = json.loads(raw_val)
+                    except Exception:
+                        continue
+                    key = val.get("key", "")
+                    if key == "core.time":
+                        try:
+                            world_time = int(json.loads(val["value"]))
+                        except Exception:
+                            pass
+                    elif key == "seasons-and-stars.activeCalendarData":
+                        try:
+                            cal = json.loads(val["value"])
+                        except Exception:
+                            pass
+                    elif key == "pf2e.worldClock":
+                        try:
+                            wc = json.loads(val["value"])
+                            world_created_on = wc.get("worldCreatedOn")
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"  ⚠  Could not read settings for in-game date: {e}")
+            return None
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        if world_time is None or cal is None or not world_created_on:
+            return None
+
+        try:
+            from datetime import timezone as _tz
+            months = cal["months"]
+            days_per_year = sum(m["days"] for m in months)
+            t = cal["time"]
+            spd = t["hoursInDay"] * t["minutesInHour"] * t["secondsInMinute"]
+            total_days = math.floor(world_time / spd)
+
+            year_cfg = cal.get("year", {})
+            current_year = year_cfg.get("currentYear", 0)
+
+            wco = datetime.fromisoformat(world_created_on.replace("Z", "+00:00"))
+            ref_year = wco.year
+            ref_day = wco.timetuple().tm_yday  # 1-indexed day of Gregorian year
+            epoch_offset = (ref_year - current_year) * days_per_year + ref_day
+
+            adjusted_days = total_days + epoch_offset
+            years_offset = adjusted_days // days_per_year
+            day_in_year = adjusted_days % days_per_year
+
+            display_year = current_year + years_offset
+
+            month_name = "Unknown"
+            day_num = 1
+            rem = day_in_year
+            for m in months:
+                if rem < m["days"]:
+                    month_name = m["name"]
+                    day_num = rem + 1
+                    break
+                rem -= m["days"]
+
+            prefix = year_cfg.get("prefix", "")
+            suffix = year_cfg.get("suffix", "")
+            year_str = f"{prefix} {display_year} {suffix}".strip() if (prefix or suffix) else str(display_year)
+
+            return f"{day_num} {month_name}, {year_str}"
+        except Exception as e:
+            print(f"  ⚠  Could not compute in-game date: {e}")
+            return None
 
     def session_window(self) -> tuple[datetime, datetime]:
         now = datetime.now()
@@ -2625,10 +2728,15 @@ class SessionExporter:
 
     def render_session_page(self, date_str: str, session_data: dict,
                             loot: list, start: datetime, end: datetime,
-                            removed: list = None) -> str:
+                            removed: list = None,
+                            ingame_date: str = None) -> str:
         lines = [
             f"= Session: {start.strftime('%B %d, %Y')} =",
             "",
+        ]
+        if ingame_date:
+            lines += [f"'''In-game date:''' {ingame_date}", ""]
+        lines += [
             f"''Window: {start.strftime('%Y-%m-%d %H:%M')} → "
             f"{end.strftime('%Y-%m-%d %H:%M')} | "
             f"Encounters: {session_data['num_combats']}''",
@@ -2731,7 +2839,11 @@ class SessionExporter:
         # Save snapshot for next run's diff
         self._save_snapshot(all_chars, date_str)
 
-        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed)
+        ingame_date = self._read_ingame_date()
+        if ingame_date:
+            print(f"  In-game date:       {ingame_date}")
+
+        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed, ingame_date)
         page_title = f"Sessions/{date_str}"
         page       = site.pages[page_title]
         current    = page.text()
