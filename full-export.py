@@ -731,6 +731,27 @@ class FullExporter:
                     npcs.append(self._parse_npc(actor))
         return npcs
 
+    def get_party_actors(self) -> list:
+        """
+        PF2e 'party' actors — the shared party stash/inventory. Returns
+        lightweight dicts shaped like get_all_characters() output
+        ({id, name, items}) so callers can treat them the same way for
+        inventory-diffing purposes.
+        """
+        parties = []
+        with self.actors_db.iterator() as it:
+            for _, value in it:
+                try:
+                    actor = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(actor, dict) and actor.get("type") == "party":
+                    actor_id = actor.get("_id")
+                    raw_items = self._get_actor_items(actor_id)
+                    items = [enrich_item(i, self.compendium) for i in raw_items]
+                    parties.append({"id": actor_id, "name": actor.get("name", "Party Stash"), "items": items})
+        return parties
+
     def debug_dump(self, name: str):
         """Dump raw system fields for a named actor, including full item data."""
         with self.actors_db.iterator() as it:
@@ -2669,7 +2690,7 @@ class SessionExporter:
             except OSError:
                 pass
 
-    def _compute_loot(self, all_chars: list) -> tuple[list[dict], list[dict]]:
+    def _compute_loot(self, all_chars: list, party_ids: frozenset = frozenset()) -> tuple[list[dict], list[dict]]:
         """Return (gained, removed) item lists relative to the latest snapshot."""
         snap_file = self._snapshot_path("latest")
         if not snap_file.exists():
@@ -2691,6 +2712,7 @@ class SessionExporter:
         for char in all_chars:
             char_id    = char["id"]
             char_name  = char["name"]
+            is_party   = char_id in party_ids
             prev_items = prev_chars.get(char_id, {}).get("items", {})
             curr_ids   = set()
 
@@ -2705,22 +2727,23 @@ class SessionExporter:
                 curr_ids.add(iid)
 
                 if iid not in prev_items:
-                    gained.append({"char": char_name, "name": name,
-                                   "qty": qty, "img": img, "type": item.get("type", "")})
+                    gained.append({"char": char_name, "name": name, "qty": qty, "img": img,
+                                   "type": item.get("type", ""), "is_party": is_party})
                 else:
                     delta = qty - prev_items[iid].get("qty", qty)
                     if delta > 0:
-                        gained.append({"char": char_name, "name": name,
-                                       "qty": delta, "img": img, "type": item.get("type", "")})
+                        gained.append({"char": char_name, "name": name, "qty": delta, "img": img,
+                                       "type": item.get("type", ""), "is_party": is_party})
                     elif delta < 0:
-                        removed.append({"char": char_name, "name": name,
-                                        "qty": -delta, "img": img, "type": item.get("type", "")})
+                        removed.append({"char": char_name, "name": name, "qty": -delta, "img": img,
+                                        "type": item.get("type", ""), "is_party": is_party})
 
             # Items in snapshot that are entirely gone from current inventory
             for iid, prev_item in prev_items.items():
                 if iid not in curr_ids:
                     removed.append({"char": char_name, "name": prev_item.get("name", "Unknown"),
-                                    "qty": prev_item.get("qty", 1), "img": "", "type": ""})
+                                    "qty": prev_item.get("qty", 1), "img": "", "type": "",
+                                    "is_party": is_party})
 
         return gained, removed
 
@@ -2761,6 +2784,11 @@ class SessionExporter:
             lines.append("* ''No enemies encountered this session.''")
         lines.append("")
 
+        def _char_cell(entry: dict) -> str:
+            if entry.get("is_party"):
+                return entry["char"]
+            return f"[[Characters/{entry['char']}|{entry['char']}]]"
+
         lines.append("== Loot Gained ==")
         if loot:
             lines.append('{| class="wikitable sortable" style="width:100%;"')
@@ -2770,7 +2798,7 @@ class SessionExporter:
                 lines += [
                     "|-",
                     f"| {icon_s} || [[{entry['name']}]] || {entry['qty']} "
-                    f"|| [[Characters/{entry['char']}|{entry['char']}]]",
+                    f"|| {_char_cell(entry)}",
                 ]
             lines.append("|}")
         else:
@@ -2786,7 +2814,7 @@ class SessionExporter:
                 lines += [
                     "|-",
                     f"| {icon_s} || {entry['name']} || {entry['qty']} "
-                    f"|| [[Characters/{entry['char']}|{entry['char']}]]",
+                    f"|| {_char_cell(entry)}",
                 ]
             lines.append("|}")
             lines.append("")
@@ -2816,8 +2844,14 @@ class SessionExporter:
         print(f"  Characters present:  {len(session_data['characters_present'])}")
         print(f"  Enemies encountered: {len(session_data['enemies_encountered'])}")
 
+        # Party stash ('party' actor) holds shared loot not on any one character —
+        # include it in inventory tracking alongside PCs.
+        party_actors = self.full_exporter.get_party_actors()
+        party_ids    = frozenset(p["id"] for p in party_actors)
+        inventory_entities = all_chars + party_actors
+
         # Compute loot BEFORE saving snapshot so we diff against yesterday's state
-        loot, removed = self._compute_loot(all_chars)
+        loot, removed = self._compute_loot(inventory_entities, party_ids)
         print(f"  Loot items gained:  {len(loot)}")
         print(f"  Items removed:      {len(removed)}")
 
@@ -2830,11 +2864,11 @@ class SessionExporter:
         if not has_activity:
             print(f"  –  No activity detected — skipping session page for {date_str}.")
             # Still save snapshot so next run has an accurate baseline
-            self._save_snapshot(all_chars, date_str)
+            self._save_snapshot(inventory_entities, date_str)
             return
 
         # Save snapshot for next run's diff
-        self._save_snapshot(all_chars, date_str)
+        self._save_snapshot(inventory_entities, date_str)
 
         ingame_date = self._read_ingame_date()
         if ingame_date:
