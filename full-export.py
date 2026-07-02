@@ -2673,7 +2673,8 @@ class SessionExporter:
                     "qty":  qty,
                     "img":  item.get("img", ""),
                 }
-            snapshot[char["id"]] = {"name": char["name"], "items": items}
+            snapshot[char["id"]] = {"name": char["name"], "items": items,
+                                     "level": char.get("level"), "xp": char.get("xp")}
 
         data    = {"timestamp": datetime.now().isoformat(), "characters": snapshot}
         payload = json.dumps(data, indent=2)
@@ -2747,10 +2748,61 @@ class SessionExporter:
 
         return gained, removed
 
+    def _compute_xp(self, all_chars: list, characters_present: list) -> list[dict]:
+        """
+        Return XP gained this session for each PC in characters_present.
+
+        PF2e resets a character's xp field to a small remainder after a
+        level-up, so a raw xp delta would go negative across a level-up
+        mid-session. Track total progress as level*1000 + xp instead (PF2e's
+        standard track is 1000 xp per level) so the delta stays correct
+        regardless of how many level-ups happened in between.
+        """
+        snap_file = self._snapshot_path("latest")
+        if not snap_file.exists():
+            return []
+
+        try:
+            prev = json.loads(snap_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"  ⚠  Could not read snapshot: {e}")
+            return []
+
+        prev_chars = prev.get("characters", {})
+        present    = set(characters_present)
+        results    = []
+
+        for char in all_chars:
+            if char["name"] not in present:
+                continue
+            level, xp = char.get("level"), char.get("xp")
+            if level is None or xp is None:
+                continue
+
+            prev_entry = prev_chars.get(char["id"])
+            if not prev_entry or prev_entry.get("level") is None or prev_entry.get("xp") is None:
+                continue
+
+            start_level, start_xp = _int(prev_entry["level"]), _int(prev_entry["xp"])
+            end_level,   end_xp   = _int(level), _int(xp)
+            gained = (end_level * 1000 + end_xp) - (start_level * 1000 + start_xp)
+            if gained == 0:
+                continue
+
+            results.append({
+                "name": char["name"],
+                "start_level": start_level, "start_xp": start_xp,
+                "end_level":   end_level,   "end_xp":   end_xp,
+                "gained":      gained,
+            })
+
+        return sorted(results, key=lambda r: r["name"])
+
     def render_session_page(self, date_str: str, session_data: dict,
                             loot: list, start: datetime, end: datetime,
                             removed: list = None,
-                            ingame_date: str = None) -> str:
+                            ingame_date: str = None,
+                            xp_data: list = None) -> str:
         lines = [
             f"= Session: {start.strftime('%B %d, %Y')} =",
             "",
@@ -2770,6 +2822,30 @@ class SessionExporter:
                 lines.append(f"* [[Characters/{name}|{name}]]")
         else:
             lines.append("* ''No player characters recorded in combat this session.''")
+        lines.append("")
+
+        lines.append("== XP Gained ==")
+        if xp_data:
+            lines.append('{| class="wikitable sortable" style="width:100%;"')
+            lines.append("! Character !! Start !! End !! Gained")
+            for entry in xp_data:
+                start_s = f"Level {entry['start_level']} ({entry['start_xp']} xp)"
+                end_s   = f"Level {entry['end_level']} ({entry['end_xp']} xp)"
+                lines += [
+                    "|-",
+                    f"| [[Characters/{entry['name']}|{entry['name']}]] || {start_s} || {end_s} "
+                    f"|| +{entry['gained']}",
+                ]
+            lines.append("|}")
+            n_present = len(session_data["characters_present"])
+            if n_present:
+                total   = sum(e["gained"] for e in xp_data)
+                average = total / n_present
+                lines.append("")
+                lines.append(f"''Average XP this session (total gained ÷ characters present): "
+                             f"{average:.1f}'' — use this if a character's entry looks off.")
+        else:
+            lines.append("* ''No XP change recorded this session.''")
         lines.append("")
 
         lines.append("== Enemies Encountered ==")
@@ -2850,16 +2926,20 @@ class SessionExporter:
         party_ids    = frozenset(p["id"] for p in party_actors)
         inventory_entities = all_chars + party_actors
 
-        # Compute loot BEFORE saving snapshot so we diff against yesterday's state
+        # Compute loot and XP BEFORE saving snapshot so we diff against yesterday's state
         loot, removed = self._compute_loot(inventory_entities, party_ids)
         print(f"  Loot items gained:  {len(loot)}")
         print(f"  Items removed:      {len(removed)}")
+
+        xp_data = self._compute_xp(all_chars, session_data["characters_present"])
+        print(f"  XP changes:         {len(xp_data)}")
 
         # ── Skip page creation if no meaningful activity occurred ──────────
         has_activity = (
             len(session_data["characters_present"])  > 0 or
             len(session_data["enemies_encountered"])  > 0 or
-            len(loot)                                 > 0
+            len(loot)                                 > 0 or
+            len(xp_data)                              > 0
         )
         if not has_activity:
             print(f"  –  No activity detected — skipping session page for {date_str}.")
@@ -2874,7 +2954,7 @@ class SessionExporter:
         if ingame_date:
             print(f"  In-game date:       {ingame_date}")
 
-        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed, ingame_date)
+        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed, ingame_date, xp_data)
         page_title = f"Sessions/{date_str}"
         page       = site.pages[page_title]
         current    = page.text()
