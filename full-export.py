@@ -2356,6 +2356,22 @@ class FullExporter:
         ]
         return "\n".join(lines)
 
+    def render_party_stash_page(self, parties: list) -> str:
+        """Render the shared party stash ('party' actor items) using the same
+        inventory tables as a character page."""
+        lines = ["= Party Stash =", ""]
+        for party in parties:
+            if len(parties) > 1:
+                lines.append(f"== {party['name']} ==")
+            inv_content = self._section_inventory(party["items"])
+            lines.append(inv_content.strip() or "* ''No items.''")
+            lines.append("")
+        lines += [
+            f"''Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Party Stash]]",
+        ]
+        return "\n".join(lines)
+
     # ── Push / preview ────────────────────────────────────────────────────
 
     _SYNC_LINE_RE = re.compile(r"^''Last synced:.*?''\n?", re.MULTILINE)
@@ -2407,6 +2423,24 @@ class FullExporter:
         print(f"\nDone — {total} processed: "
               f"{pushed} pushed, {skipped} skipped (unchanged), {errors} errors.")
 
+    def push_party_stash(self, site):
+        """Push the party stash page. Accepts a shared mwclient.Site instance."""
+        parties = self.get_party_actors()
+        if not parties:
+            print("  ⚠  No party actor found — skipping party stash page.")
+            return
+
+        new_markup     = self.render_party_stash_page(parties)
+        page           = site.pages["Party Stash"]
+        current_markup = page.text()
+
+        if current_markup and self._comparable(current_markup) == self._comparable(new_markup):
+            print("  –  Skipped (no changes): Party Stash")
+            return
+
+        page.edit(new_markup, summary="Auto-sync: PF2e party stash exporter.")
+        print(f"✓  {'Created' if not current_markup else 'Updated'}: Party Stash")
+
     def preview(self, target_name: str | None = None, npcs: bool = False):
         actors = self.get_all_npcs() if npcs else self.get_all_characters()
         if target_name:
@@ -2422,6 +2456,17 @@ class FullExporter:
             filename = out_dir / f"{'NPC_' if npcs else ''}{actor['name'].replace(' ','_').replace('/','_')}.wiki"
             filename.write_text(markup, encoding="utf-8")
             print(f"✓  Preview written: {filename}")
+
+    def preview_party_stash(self):
+        parties = self.get_party_actors()
+        if not parties:
+            print("  ⚠  No party actor found.")
+            return
+        out_dir  = Path("wiki_preview")
+        out_dir.mkdir(exist_ok=True)
+        filename = out_dir / "Party_Stash.wiki"
+        filename.write_text(self.render_party_stash_page(parties), encoding="utf-8")
+        print(f"✓  Preview written: {filename}")
 
     def close(self):
         self.actors_db.close()
@@ -2995,6 +3040,8 @@ Examples:
                         help="Single actor by name")
     parser.add_argument("--npcs",          action="store_true",
                         help="Include NPC export in this run")
+    parser.add_argument("--party",         action="store_true",
+                        help="Include the party stash export in this run")
     parser.add_argument("--session",       action="store_true",
                         help="Build and push today's session log (4am window)")
     parser.add_argument("--session-date",  metavar="YYYY-MM-DD",
@@ -3033,6 +3080,11 @@ Examples:
                 print("\n── NPCs ────────────────────────────────────────────")
                 exporter.push_to_wiki(site, target_name=None, npcs=True)
 
+            # Optionally push the party stash
+            if args.party:
+                print("\n── Party Stash ─────────────────────────────────────")
+                exporter.push_party_stash(site)
+
             # Optionally push session log
             if args.session:
                 session_start = None
@@ -3051,6 +3103,8 @@ Examples:
             if args.session:
                 print("Note: --session only runs in --push mode. Previewing instead.")
             exporter.preview(target_name=args.char, npcs=args.npcs)
+            if args.party:
+                exporter.preview_party_stash()
 
     finally:
         exporter.close()
