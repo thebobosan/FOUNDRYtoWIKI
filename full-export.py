@@ -2533,7 +2533,20 @@ class SessionExporter:
             print(f"  ⚠  Could not compute in-game date: {e}")
             return None
 
-    def session_window(self) -> tuple[datetime, datetime]:
+    def session_window(self, start_date: datetime = None) -> tuple[datetime, datetime]:
+        """
+        Return (start, end) for the 04:00->04:00 session window.
+
+        With no argument, returns the most recently closed window relative to
+        now. Pass `start_date` (any datetime on the desired start day) to
+        target a specific past window instead — e.g. start_date=June 30
+        returns (June 30 04:00, July 1 04:00), matching page Sessions/20260630.
+        """
+        if start_date is not None:
+            start = start_date.replace(hour=self.SESSION_HOUR, minute=0, second=0, microsecond=0)
+            end   = start + timedelta(days=1)
+            return start, end
+
         now = datetime.now()
         end = now.replace(hour=self.SESSION_HOUR, minute=0, second=0, microsecond=0)
         # Use hour comparison so that exactly 4:00:00 correctly closes the prior window
@@ -2542,95 +2555,80 @@ class SessionExporter:
         start = end - timedelta(days=1)
         return start, end
 
-    def _read_combats(self) -> list[dict]:
-        combats_path = self.world_path / "data" / "combats"
-        if not combats_path.exists():
-            print("  ⚠  No combats database found — skipping combat data.")
+    def _read_initiative_rolls(self, start: datetime, end: datetime) -> list[dict]:
+        """
+        Read the chat message log for initiative rolls within the session window.
+
+        Foundry deletes the `Combat` document (and its combatants) once an
+        encounter ends, so `data/combats` is normally empty by the time we run
+        this export. Chat messages persist, and every combatant — PC or NPC —
+        posts a message flagged `flags.core.initiativeRoll = true` when they
+        roll initiative, so that's the only durable record of who fought.
+        """
+        messages_path = self.world_path / "data" / "messages"
+        if not messages_path.exists():
+            print("  ⚠  No messages database found — skipping combat data.")
             return []
 
+        start_ms = start.timestamp() * 1000
+        end_ms   = end.timestamp()   * 1000
+
         tmp      = tempfile.mkdtemp()
-        tmp_path = Path(tmp) / "combats"
-        combats: dict[str, dict] = {}
-        combatant_buckets: dict[str, list] = {}
+        tmp_path = Path(tmp) / "messages"
+        rolls: list[dict] = []
 
         try:
-            shutil.copytree(str(combats_path), str(tmp_path))
+            shutil.copytree(str(messages_path), str(tmp_path))
             db = plyvel.DB(str(tmp_path))
             with db:
-                for raw_key, raw_val in db:
-                    k     = raw_key.decode("utf-8", errors="replace")
-                    parts = k.split("!")
-                    if len(parts) < 3:
+                for _, raw_val in db:
+                    try:
+                        m = json.loads(raw_val)
+                    except Exception:
                         continue
-                    collection = parts[1]
-                    if "combatants" in collection:
-                        id_part   = parts[2]
-                        combat_id = id_part.split(".")[0] if "." in id_part else id_part
-                        try:
-                            combatant = json.loads(raw_val)
-                            if isinstance(combatant, dict):
-                                combatant_buckets.setdefault(combat_id, []).append(combatant)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            combat    = json.loads(raw_val)
-                            combat_id = combat.get("_id", parts[2])
-                            if isinstance(combat, dict):
-                                combats[combat_id] = combat
-                        except Exception:
-                            pass
+                    if not isinstance(m, dict):
+                        continue
+                    if not (m.get("flags") or {}).get("core", {}).get("initiativeRoll"):
+                        continue
+                    ts = m.get("timestamp", 0)
+                    if not (start_ms <= float(ts) <= end_ms):
+                        continue
+                    spk      = m.get("speaker") or {}
+                    actor_id = spk.get("actor", "")
+                    if actor_id:
+                        rolls.append({"actor_id": actor_id, "scene": spk.get("scene", ""), "ts": ts})
         except Exception as e:
-            print(f"  ⚠  Could not read combats database: {e}")
+            print(f"  ⚠  Could not read messages database: {e}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-        for combat_id, combat in combats.items():
-            combat["combatants"] = combatant_buckets.get(combat_id, [])
+        return rolls
 
-        return list(combats.values())
-
-    def _filter_by_window(self, combats: list, start: datetime, end: datetime) -> list:
-        start_ms = start.timestamp() * 1000
-        end_ms   = end.timestamp()   * 1000
-        result   = []
-        for combat in combats:
-            stats   = combat.get("_stats") or {}
-            created = stats.get("createdTime") or stats.get("modifiedTime")
-            if created is None:
-                result.append(combat)
-            elif start_ms <= float(created) <= end_ms:
-                result.append(combat)
-        return result
-
-    def _extract_session_data(self, combats: list, all_chars: list) -> dict:
+    def _extract_session_data(self, rolls: list[dict], all_chars: list, all_npcs: list) -> dict:
         char_by_id = {c["id"]: c["name"] for c in all_chars if c.get("id")}
+        npc_by_id  = {n["id"]: n for n in all_npcs if n.get("id")}
 
-        characters_present: set[str] = set()
-        enemies_killed:     list[dict] = []
-        seen_enemies:       set[str]  = set()
+        characters_present: set[str]   = set()
+        enemies_encountered: list[dict] = []
+        seen_enemies:        set[str]  = set()
+        scenes:               set[str] = set()
 
-        for combat in combats:
-            for combatant in combat.get("combatants", []):
-                actor_id = combatant.get("actorId", "")
-                token    = combatant.get("token") or {}
-                name     = combatant.get("name") or token.get("name") or "Unknown"
-                defeated = combatant.get("defeated", False)
-                hidden   = combatant.get("hidden", False)
+        for roll in rolls:
+            actor_id = roll["actor_id"]
+            if roll.get("scene"):
+                scenes.add(roll["scene"])
 
-                if actor_id in char_by_id:
-                    characters_present.add(char_by_id[actor_id])
-                elif defeated and not hidden:
-                    key = name.strip().lower()
-                    if key not in seen_enemies:
-                        seen_enemies.add(key)
-                        img = icon_url(combatant.get("img") or token.get("img", ""), "character")
-                        enemies_killed.append({"name": name, "img": img})
+            if actor_id in char_by_id:
+                characters_present.add(char_by_id[actor_id])
+            elif actor_id in npc_by_id and actor_id not in seen_enemies:
+                seen_enemies.add(actor_id)
+                npc = npc_by_id[actor_id]
+                enemies_encountered.append({"name": npc["name"], "img": npc.get("portrait", "")})
 
         return {
-            "characters_present": sorted(characters_present),
-            "enemies_killed":     enemies_killed,
-            "num_combats":        len(combats),
+            "characters_present":  sorted(characters_present),
+            "enemies_encountered": enemies_encountered,
+            "num_combats":         len(scenes),
         }
 
     def _snapshot_path(self, label: str = "latest") -> Path:
@@ -2751,16 +2749,16 @@ class SessionExporter:
             lines.append("* ''No player characters recorded in combat this session.''")
         lines.append("")
 
-        lines.append("== Enemies Defeated ==")
-        if session_data["enemies_killed"]:
+        lines.append("== Enemies Encountered ==")
+        if session_data["enemies_encountered"]:
             lines.append('{| class="wikitable" style="width:100%;"')
             lines.append("! !! Enemy")
-            for enemy in sorted(session_data["enemies_killed"], key=lambda e: e["name"]):
+            for enemy in sorted(session_data["enemies_encountered"], key=lambda e: e["name"]):
                 icon_s = wiki_img(enemy["img"], 24, enemy["name"]) if enemy.get("img") else ""
                 lines += ["|-", f"| {icon_s} || {enemy['name']}"]
             lines.append("|}")
         else:
-            lines.append("* ''No enemies defeated this session.''")
+            lines.append("* ''No enemies encountered this session.''")
         lines.append("")
 
         lines.append("== Loot Gained ==")
@@ -2804,20 +2802,19 @@ class SessionExporter:
     def _comparable(markup: str) -> str:
         return re.sub(r"^''Generated:.*?''\n?", "", markup, flags=re.MULTILINE).strip()
 
-    def run(self, site, all_chars: list):
-        start, end = self.session_window()
+    def run(self, site, all_chars: list, start_date: datetime = None):
+        start, end = self.session_window(start_date)
         date_str   = start.strftime("%Y%m%d")
 
         print(f"\nSession window: {start.strftime('%Y-%m-%d %H:%M')} → "
               f"{end.strftime('%Y-%m-%d %H:%M')} (page: Sessions/{date_str})")
 
-        all_combats     = self._read_combats()
-        session_combats = self._filter_by_window(all_combats, start, end)
-        print(f"  Combats in window: {len(session_combats)} / {len(all_combats)} total")
+        rolls = self._read_initiative_rolls(start, end)
+        print(f"  Initiative rolls in window: {len(rolls)}")
 
-        session_data = self._extract_session_data(session_combats, all_chars)
-        print(f"  Characters present: {len(session_data['characters_present'])}")
-        print(f"  Enemies defeated:   {len(session_data['enemies_killed'])}")
+        session_data = self._extract_session_data(rolls, all_chars, self.full_exporter.get_all_npcs())
+        print(f"  Characters present:  {len(session_data['characters_present'])}")
+        print(f"  Enemies encountered: {len(session_data['enemies_encountered'])}")
 
         # Compute loot BEFORE saving snapshot so we diff against yesterday's state
         loot, removed = self._compute_loot(all_chars)
@@ -2826,9 +2823,9 @@ class SessionExporter:
 
         # ── Skip page creation if no meaningful activity occurred ──────────
         has_activity = (
-            len(session_data["characters_present"]) > 0 or
-            len(session_data["enemies_killed"])      > 0 or
-            len(loot)                                > 0
+            len(session_data["characters_present"])  > 0 or
+            len(session_data["enemies_encountered"])  > 0 or
+            len(loot)                                 > 0
         )
         if not has_activity:
             print(f"  –  No activity detected — skipping session page for {date_str}.")
@@ -2886,6 +2883,10 @@ Examples:
                         help="Include NPC export in this run")
     parser.add_argument("--session",       action="store_true",
                         help="Build and push today's session log (4am window)")
+    parser.add_argument("--session-date",  metavar="YYYY-MM-DD",
+                        help="Rebuild a specific past session window instead of today's "
+                             "(the window's START date, e.g. --session-date 2026-06-30 "
+                             "rebuilds June 30 04:00 -> July 1 04:00, page Sessions/20260630)")
     parser.add_argument("--debug",         action="store_true",
                         help="Dump raw system data for --char")
     parser.add_argument("--world",         default=WORLD_PATH,
@@ -2920,9 +2921,16 @@ Examples:
 
             # Optionally push session log
             if args.session:
+                session_start = None
+                if args.session_date:
+                    try:
+                        session_start = datetime.strptime(args.session_date, "%Y-%m-%d")
+                    except ValueError:
+                        print(f"--session-date must be YYYY-MM-DD, got: {args.session_date}")
+                        sys.exit(1)
                 all_chars = exporter.get_all_characters()
                 sess = SessionExporter(args.world, exporter)
-                sess.run(site, all_chars)
+                sess.run(site, all_chars, session_start)
 
         else:
             # Preview mode
