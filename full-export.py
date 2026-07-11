@@ -86,6 +86,24 @@ def icon_url(img: str, item_type: str = "") -> str:
     return f"{FOUNDRY_URL}/{path.lstrip('/')}"
 
 
+def wiki_escape(name: str) -> str:
+    """
+    Escape MediaWiki markup metacharacters in player-editable text (item,
+    character, spell, feat names, etc.) before interpolating it into
+    wikitext. A literal '|' breaks table rows, '[[' / ']]' breaks or
+    redirects links, and '{{' / '}}' can trigger template transclusion —
+    all of which are otherwise reachable since these names come straight
+    from freely player-editable Foundry data.
+    """
+    if not isinstance(name, str):
+        return name
+    return (name.replace("{{", "&#123;&#123;")
+                .replace("}}", "&#125;&#125;")
+                .replace("[[", "&#91;&#91;")
+                .replace("]]", "&#93;&#93;")
+                .replace("|", "&#124;"))
+
+
 def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
     """
     Render an external image using MediaWiki's <html> extension tag.
@@ -2018,11 +2036,11 @@ class FullExporter:
             if found:
                 img    = icon_url(found.get("img", ""), itype)
                 icon_s = wiki_img(img, 20, found["name"]) + " " if img else ""
-                lines.append(f"* '''{label}:''' {icon_s}{found['name']}")
+                lines.append(f"* '''{label}:''' {icon_s}{wiki_escape(found['name'])}")
         if char.get("deity"):
             img    = char.get("deity_img", "")
             icon_s = wiki_img(img, 20, char["deity"]) + " " if img else ""
-            lines.append(f"* '''Deity:''' {icon_s}{char['deity']}")
+            lines.append(f"* '''Deity:''' {icon_s}{wiki_escape(char['deity'])}")
         for key, label in [("keyability","Key Ability"),("xp","XP"),
                             ("hero_points","Hero Points"),
                             ("focus","Focus Points"),("languages","Languages")]:
@@ -2131,7 +2149,7 @@ class FullExporter:
             "! Skill !! Modifier !! Proficiency",
         ]
         for name, data in sorted(char["skills"].items()):
-            lines.append(f"|-\n| {name} || {fmt_mod(data['total'])} || {self._fmt_prof(data['rank'])}")
+            lines.append(f"|-\n| {wiki_escape(name)} || {fmt_mod(data['total'])} || {self._fmt_prof(data['rank'])}")
         lines.append("|}")
         return "\n".join(lines)
 
@@ -2207,7 +2225,7 @@ class FullExporter:
             for feat in sorted(gfeats, key=lambda f: f["name"]):
                 icon_s = wiki_img(feat["img"], 20, feat["name"]) + " " if feat.get("img") else ""
                 trait_s = (" <small>(" + ", ".join(feat["traits"]) + ")</small>") if feat["traits"] else ""
-                lines.append(f"; {icon_s}'''{feat['name']}'''{trait_s}")
+                lines.append(f"; {icon_s}'''{wiki_escape(feat['name'])}'''{trait_s}")
                 if feat["desc"]:
                     lines.append(f": {feat['desc']}")
             lines.append("")
@@ -2265,7 +2283,7 @@ class FullExporter:
                                   if isinstance(pnode, dict) and pnode.get(c)) or "—"
                 img   = icon_url(item.get("img", ""), itype)
                 lines.append("|-")
-                lines.append(f"| {wiki_img(img, 24, name)} || [[{name}]] || {qty} || {bulk} || {lvl} || {price}")
+                lines.append(f"| {wiki_img(img, 24, name)} || [[{wiki_escape(name)}]] || {qty} || {bulk} || {lvl} || {price}")
                 if itype == "backpack" and item.get("_id") in cont_contents:
                     lines.append("|-")
                     lines.append('| colspan="6" |')
@@ -2288,13 +2306,13 @@ class FullExporter:
             icon_s = wiki_img(img, 16, name) + " " if img else ""
             bullet = "*" * depth
             if item.get("type") == "backpack":
-                lines.append(f"{bullet} {icon_s}'''{name}'''")
+                lines.append(f"{bullet} {icon_s}'''{wiki_escape(name)}'''")
                 child_id = item.get("_id")
                 if child_id and child_id not in visited:
                     visited.add(child_id)
                     lines.extend(self._render_container_tree(child_id, cont, depth + 1, visited))
             else:
-                lines.append(f"{bullet} {icon_s}{name}{qty_s}")
+                lines.append(f"{bullet} {icon_s}{wiki_escape(name)}{qty_s}")
         return lines
 
     @staticmethod
@@ -2327,7 +2345,7 @@ class FullExporter:
         for entry in entries:
             trad  = f" ({entry['tradition'].title()})" if entry["tradition"] else ""
             ctype = f" — {entry['type'].title()}"      if entry["type"]      else ""
-            lines.append(f"====={entry['name']}{trad}{ctype}=====")
+            lines.append(f"====={wiki_escape(entry['name'])}{trad}{ctype}=====")
             if entry.get("dc") or entry.get("attack"):
                 dc_s  = f"DC {entry['dc']}"                    if entry.get("dc")     else ""
                 atk_s = f"Attack {fmt_mod(entry['attack'])}"   if entry.get("attack") else ""
@@ -2346,7 +2364,7 @@ class FullExporter:
                         lines.append(f"\n'''{rl}'''{slot_info}")
                     icon_s  = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
                     trait_s = (" <small>[" + ", ".join(spell["traits"]) + "]</small>") if spell["traits"] else ""
-                    lines.append(f"* {icon_s}[[{spell['name']}]]{trait_s}")
+                    lines.append(f"* {icon_s}[[{wiki_escape(spell['name'])}]]{trait_s}")
                     if spell.get("desc"):
                         lines.append(self._spell_desc_block(spell["desc"]))
             lines.append("")
@@ -2355,7 +2373,7 @@ class FullExporter:
             lines.append("=====Other Spells=====")
             for spell in sorted(orphans, key=lambda s: (_int(s["rank"], 99), s["name"])):
                 icon_s = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
-                lines.append(f"* {icon_s}[[{spell['name']}]]")
+                lines.append(f"* {icon_s}[[{wiki_escape(spell['name'])}]]")
                 if spell.get("desc"):
                     lines.append(self._spell_desc_block(spell["desc"]))
             lines.append("")
@@ -2580,11 +2598,12 @@ class FullExporter:
         }
 
     def render_npc_page(self, npc: dict) -> str:
+        name_esc = wiki_escape(npc['name'])
         lines = [
-            f"= {npc['name']} =",
+            f"= {name_esc} =",
             "",
             "{{CharacterInfobox",
-            f"| name       = {npc['name']}",
+            f"| name       = {name_esc}",
         ]
         if npc["portrait"]:
             lines.append(f"| portrait   = {npc['portrait']}")
@@ -2629,11 +2648,12 @@ class FullExporter:
         hp_str = f"{char['hp']}/{char['hp_max']}" + (f" (+{char['hp_temp']} temp)" if char.get("hp_temp") else "")
         speed_parts = [f"{char['speed']} ft."] + [f"{sp['value']} ft. {sp['type']}" for sp in char.get("other_speeds", [])]
 
+        char_name_esc = wiki_escape(char['name'])
         lines = [
-            f"= {char['name']} =",
+            f"= {char_name_esc} =",
             "",
             "{{CharacterInfobox",
-            f"| name        = {char['name']}",
+            f"| name        = {char_name_esc}",
         ]
         if char["portrait"]:
             lines.append(f"| portrait    = {char['portrait']}")
@@ -2674,7 +2694,7 @@ class FullExporter:
                 return ""
             ts   = entry.get("ts", 0)
             date = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else ""
-            return f"{entry['name']}" + (f" ({date})" if date else "")
+            return f"{wiki_escape(entry['name'])}" + (f" ({date})" if date else "")
 
         last_kill    = _fmt_cr(cr.get("last_kill"))
         last_downed  = _fmt_cr(cr.get("last_downed_by"))
@@ -2718,7 +2738,7 @@ class FullExporter:
         lines = ["= Party Stash =", ""]
         for party in parties:
             if len(parties) > 1:
-                lines.append(f"== {party['name']} ==")
+                lines.append(f"== {wiki_escape(party['name'])} ==")
             inv_content = self._section_inventory(party["items"])
             lines.append(inv_content.strip() or "* ''No items.''")
             lines.append("")
@@ -3243,7 +3263,8 @@ class SessionExporter:
         lines.append("== Characters Present ==")
         if session_data["characters_present"]:
             for name in session_data["characters_present"]:
-                lines.append(f"* [[Characters/{name}|{name}]]")
+                name_esc = wiki_escape(name)
+                lines.append(f"* [[Characters/{name_esc}|{name_esc}]]")
         else:
             lines.append("* ''No player characters recorded in combat this session.''")
         lines.append("")
@@ -3253,11 +3274,12 @@ class SessionExporter:
             lines.append('{| class="wikitable sortable" style="width:100%;"')
             lines.append("! Character !! Start !! End !! Gained")
             for entry in xp_data:
-                start_s = f"Level {entry['start_level']} ({entry['start_xp']} xp)"
-                end_s   = f"Level {entry['end_level']} ({entry['end_xp']} xp)"
+                start_s  = f"Level {entry['start_level']} ({entry['start_xp']} xp)"
+                end_s    = f"Level {entry['end_level']} ({entry['end_xp']} xp)"
+                name_esc = wiki_escape(entry['name'])
                 lines += [
                     "|-",
-                    f"| [[Characters/{entry['name']}|{entry['name']}]] || {start_s} || {end_s} "
+                    f"| [[Characters/{name_esc}|{name_esc}]] || {start_s} || {end_s} "
                     f"|| +{entry['gained']}",
                 ]
             lines.append("|}")
@@ -3289,7 +3311,8 @@ class SessionExporter:
                     g["killed"] += 1
             for name, g in sorted(grouped.items()):
                 icon_s = wiki_img(g["img"], 24, name) if g["img"] else ""
-                name_s = name if g["count"] == 1 else f"{name} x{g['count']}"
+                name_esc = wiki_escape(name)
+                name_s = name_esc if g["count"] == 1 else f"{name_esc} x{g['count']}"
                 lines += ["|-", f"| {icon_s} || {name_s} || {g['killed']}/{g['count']}"]
             lines.append("|}")
         else:
@@ -3297,9 +3320,10 @@ class SessionExporter:
         lines.append("")
 
         def _char_cell(entry: dict) -> str:
+            name_esc = wiki_escape(entry["char"])
             if entry.get("is_party"):
-                return entry["char"]
-            return f"[[Characters/{entry['char']}|{entry['char']}]]"
+                return name_esc
+            return f"[[Characters/{name_esc}|{name_esc}]]"
 
         lines.append("== Loot Gained ==")
         if loot:
@@ -3309,7 +3333,7 @@ class SessionExporter:
                 icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
                 lines += [
                     "|-",
-                    f"| {icon_s} || [[{entry['name']}]] || {entry['qty']} "
+                    f"| {icon_s} || [[{wiki_escape(entry['name'])}]] || {entry['qty']} "
                     f"|| {_char_cell(entry)}",
                 ]
             lines.append("|}")
@@ -3325,7 +3349,7 @@ class SessionExporter:
                 icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
                 lines += [
                     "|-",
-                    f"| {icon_s} || {entry['name']} || {entry['qty']} "
+                    f"| {icon_s} || {wiki_escape(entry['name'])} || {entry['qty']} "
                     f"|| {_char_cell(entry)}",
                 ]
             lines.append("|}")
