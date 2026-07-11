@@ -425,7 +425,7 @@ def enrich_item(item: dict, compendium: dict) -> dict:
     actor_traits = traits_node.get("value", []) if isinstance(traits_node, dict) else []
     if not actor_traits and comp.get("traits"):
         traits_node = dict(traits_node) if isinstance(traits_node, dict) else {}
-        traits_node["value"] = comp["traits"]
+        traits_node["value"] = list(comp["traits"])
         sys_data["traits"] = traits_node
         enriched["system"] = sys_data
 
