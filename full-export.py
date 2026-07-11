@@ -24,6 +24,7 @@ import html
 import shutil
 import tempfile
 import math
+import bisect
 from pathlib import Path
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
@@ -598,6 +599,7 @@ class FullExporter:
         # access via combat_record(), since it requires reading the messages DB
         # and resolving token→actor names. Cached after first build.
         self._combat_record = None
+        self._raw_msgs_cache = None
 
     # ── Wiki page name tracking (renames) ───────────────────────────────────
 
@@ -871,7 +873,16 @@ class FullExporter:
         return name_by_actor, type_by_actor
 
     def _load_raw_messages(self) -> list:
-        """Copy the messages LevelDB to a temp dir and load all documents, chronologically."""
+        """
+        Copy the messages LevelDB to a temp dir and load all documents,
+        chronologically. Cached after first call — combat_record() and
+        SessionExporter's combat-stats both need the full message log, and
+        without caching each would independently re-copy and re-parse the
+        entire LevelDB from scratch.
+        """
+        if self._raw_msgs_cache is not None:
+            return self._raw_msgs_cache
+
         messages_path = self.world_path / "data" / "messages"
         if not messages_path.exists():
             return []
@@ -900,6 +911,7 @@ class FullExporter:
             print(f"  ⚠  {msg_errors} chat messages failed to parse and were skipped")
 
         raw_msgs.sort(key=lambda m: m.get("timestamp", 0))
+        self._raw_msgs_cache = raw_msgs
         return raw_msgs
 
     def _build_npc_kill_events(self) -> list:
@@ -3227,45 +3239,218 @@ class SessionExporter:
         posts a message flagged `flags.core.initiativeRoll = true` when they
         roll initiative, so that's the only durable record of who fought.
         """
-        messages_path = self.world_path / "data" / "messages"
-        if not messages_path.exists():
-            print("  ⚠  No messages database found — skipping combat data.")
-            return []
-
         start_ms = start.timestamp() * 1000
         end_ms   = end.timestamp()   * 1000
 
-        tmp      = tempfile.mkdtemp()
-        tmp_path = Path(tmp) / "messages"
         rolls: list[dict] = []
-
-        try:
-            shutil.copytree(str(messages_path), str(tmp_path))
-            db = plyvel.DB(str(tmp_path))
-            with db:
-                for _, raw_val in db:
-                    try:
-                        m = json.loads(raw_val)
-                    except Exception:
-                        continue
-                    if not isinstance(m, dict):
-                        continue
-                    if not (m.get("flags") or {}).get("core", {}).get("initiativeRoll"):
-                        continue
-                    ts = m.get("timestamp", 0)
-                    if not (start_ms <= float(ts) <= end_ms):
-                        continue
-                    spk      = m.get("speaker") or {}
-                    actor_id = spk.get("actor", "")
-                    if actor_id:
-                        rolls.append({"actor_id": actor_id, "token_id": spk.get("token", ""),
-                                      "scene": spk.get("scene", ""), "ts": ts})
-        except Exception as e:
-            print(f"  ⚠  Could not read messages database: {e}")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        for m in self.full_exporter._load_raw_messages():
+            if not (m.get("flags") or {}).get("core", {}).get("initiativeRoll"):
+                continue
+            ts = m.get("timestamp", 0)
+            if not (start_ms <= float(ts) <= end_ms):
+                continue
+            spk      = m.get("speaker") or {}
+            actor_id = spk.get("actor", "")
+            if not actor_id:
+                continue
+            try:
+                roll_total = int(str(m.get("content", "")).strip())
+            except (TypeError, ValueError):
+                roll_total = None
+            rolls.append({"actor_id": actor_id, "token_id": spk.get("token", ""),
+                          "scene": spk.get("scene", ""), "ts": ts, "roll_total": roll_total})
 
         return rolls
+
+    ENCOUNTER_GAP_MS = 30 * 60 * 1000
+
+    @staticmethod
+    def _cluster_by_gap(events: list[dict], gap_ms: float = ENCOUNTER_GAP_MS) -> list[int]:
+        """
+        Assign a 0-based cluster id to each event (dicts with 'ts' and
+        'scene' keys, pre-sorted by ts). A new cluster starts on a scene
+        change or a gap of more than gap_ms since the previous event.
+
+        Used to bucket messages into distinct encounter instances: PF2e
+        round numbers reset to 1 each encounter, and data/combats is
+        unreliable (see CLAUDE.md), so encounter boundaries have to be
+        inferred from message timing instead.
+        """
+        cluster_ids = []
+        cluster_id  = -1
+        prev_scene  = None
+        prev_ts     = None
+        for e in events:
+            scene = e.get("scene")
+            ts    = e.get("ts", 0)
+            if (prev_scene is None or scene != prev_scene
+                    or (prev_ts is not None and float(ts) - float(prev_ts) > gap_ms)):
+                cluster_id += 1
+            cluster_ids.append(cluster_id)
+            prev_scene, prev_ts = scene, ts
+        return cluster_ids
+
+    def _build_encounter_windows(self, rolls: list[dict]) -> list[dict]:
+        """
+        Cluster initiative rolls into distinct encounter instances (scene
+        change or >30-min gap — see _cluster_by_gap) and return one window
+        per encounter, chronologically: {"start_ts": <first roll's ts>,
+        "rolls": [...]}.
+
+        This is the single source of truth for "how many distinct
+        encounters happened" (len() of the result — used for num_combats)
+        and "which encounter does this later event belong to" (find the
+        window with the latest start_ts <= the event's ts — used by
+        _compute_combat_stats to bucket damage/turn events). Both must
+        agree on the same boundaries, or e.g. the "Encounters: N" count at
+        the top of a session page could disagree with the number of
+        per-encounter breakdowns below it.
+        """
+        sorted_rolls = sorted(rolls, key=lambda r: r.get("ts", 0))
+        cluster_ids  = self._cluster_by_gap(sorted_rolls)
+        windows: list[dict] = []
+        for roll, cid in zip(sorted_rolls, cluster_ids):
+            if cid == len(windows):
+                windows.append({"start_ts": roll.get("ts", 0), "rolls": []})
+            windows[cid]["rolls"].append(roll)
+        return windows
+
+    def _compute_combat_stats(self, rolls: list[dict], start: datetime, end: datetime,
+                               char_by_id: dict, npc_by_id: dict = None) -> dict:
+        """
+        Per-encounter initiative order + round count, and per-PC damage
+        dealt/taken (totals and per-turn/per-round averages) for encounters
+        within this session's window.
+
+        Damage dealt is averaged per OWN TURN taken (a "turn" belongs to one
+        creature, so this measures productivity when it was actually their
+        turn to act — including turns where they missed, so long as some
+        pf2e-flagged roll on their turn was made). Damage taken is averaged
+        per ROUND of combat they were present for instead, since taking
+        damage isn't turn-scoped (it can happen on anyone's turn, or from
+        reactions) — the natural denominator there is rounds survived, not
+        the victim's own turns.
+
+        Encounter boundaries come from _build_encounter_windows (initiative
+        rolls only, matching num_combats). Damage/turn events are bucketed
+        into whichever window most recently started before their timestamp
+        — NOT reclustered from their own timing, since round numbers reset
+        to 1 each encounter and reclustering on denser combat-message
+        timing (rather than deferring to the roll-based boundaries) merges
+        distinct back-to-back encounters on the same scene into one blob.
+        """
+        start_ms = start.timestamp() * 1000
+        end_ms   = end.timestamp()   * 1000
+        fe       = self.full_exporter
+
+        windows = self._build_encounter_windows(rolls)
+        window_starts = [w["start_ts"] for w in windows]
+
+        def _window_for_ts(ts: float):
+            idx = bisect.bisect_right(window_starts, ts) - 1
+            return idx if idx >= 0 else None
+
+        max_round: list[int] = [0] * len(windows)
+        pc_stats: dict[str, dict] = {}
+        pc_encounters: dict[str, set] = {}
+
+        def _rec(actor_id: str) -> dict:
+            return pc_stats.setdefault(actor_id, {"dealt": 0, "taken": 0, "own_turns": set()})
+
+        for roll in rolls:
+            if roll["actor_id"] not in char_by_id:
+                continue
+            widx = _window_for_ts(roll.get("ts", 0))
+            if widx is not None:
+                pc_encounters.setdefault(roll["actor_id"], set()).add(widx)
+
+        for m in fe._load_raw_messages():
+            ts = m.get("timestamp", 0)
+            if not (start_ms <= float(ts) <= end_ms):
+                continue
+            widx = _window_for_ts(ts)
+            if widx is None:
+                continue
+
+            pf   = (m.get("flags") or {}).get("pf2e") or {}
+            ctx  = pf.get("context") or {}
+            opts = ctx.get("options") or []
+
+            round_n = turn_n = None
+            for o in opts:
+                if o.startswith("encounter:round:"):
+                    round_n = _int(o.split(":")[-1])
+                elif o.startswith("encounter:turn:"):
+                    turn_n = _int(o.split(":")[-1])
+
+            # Turn presence: this message's own actor is acting on their turn.
+            if "self:participant:own-turn" in opts and round_n is not None and turn_n is not None:
+                actor_id = ctx.get("actor") or (m.get("speaker") or {}).get("actor", "")
+                if actor_id in char_by_id:
+                    _rec(actor_id)["own_turns"].add((widx, round_n, turn_n))
+
+            # Damage dealt/taken (non-healing only).
+            applied = pf.get("appliedDamage")
+            if isinstance(applied, dict) and not applied.get("isHealing"):
+                amount = sum(abs(_int(u.get("value", 0))) for u in (applied.get("updates") or [])
+                             if u.get("path") == "system.attributes.hp.value")
+                if amount > 0:
+                    if round_n:
+                        max_round[widx] = max(max_round[widx], round_n)
+                    victim_id = fe._uuid_to_actor_id(applied.get("uuid", ""))
+                    if not victim_id:
+                        victim_id = (m.get("speaker") or {}).get("actor", "")
+                    origin = pf.get("origin") or {}
+                    atk_id = fe._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+                    if victim_id in char_by_id:
+                        _rec(victim_id)["taken"] += amount
+                    if atk_id and atk_id in char_by_id and atk_id != victim_id:
+                        _rec(atk_id)["dealt"] += amount
+
+        per_char = {}
+        for actor_id in set(pc_stats) | set(pc_encounters):
+            name = char_by_id.get(actor_id)
+            if not name:
+                continue
+            r        = pc_stats.get(actor_id, {"dealt": 0, "taken": 0, "own_turns": set()})
+            n_turns  = len(r["own_turns"])
+            n_rounds = sum(max_round[widx] for widx in pc_encounters.get(actor_id, ()))
+            if not r["dealt"] and not r["taken"]:
+                continue
+            per_char[name] = {
+                "total_dealt":         r["dealt"],
+                "total_taken":         r["taken"],
+                "avg_dealt_per_turn":  (r["dealt"] / n_turns)  if n_turns  else None,
+                "avg_taken_per_round": (r["taken"] / n_rounds) if n_rounds else None,
+            }
+
+        npc_by_id = npc_by_id or {}
+
+        def _actor_name(actor_id: str) -> str:
+            if actor_id in char_by_id:
+                return char_by_id[actor_id]
+            npc = npc_by_id.get(actor_id)
+            return npc["name"] if npc else actor_id
+
+        encounter_orders = []
+        for i, win in enumerate(windows):
+            # Dedupe to each actor's first roll in this encounter (some
+            # tables reroll initiative for arriving reinforcements/new
+            # rounds — the seating order that actually ran the fight is
+            # each combatant's earliest roll, not every reroll).
+            first_roll_by_actor: dict[str, dict] = {}
+            for r in sorted(win["rolls"], key=lambda r: r.get("ts", 0)):
+                if r.get("roll_total") is None:
+                    continue
+                first_roll_by_actor.setdefault(r["actor_id"], r)
+            order = sorted(
+                ({"name": _actor_name(actor_id), "roll_total": r["roll_total"]}
+                 for actor_id, r in first_roll_by_actor.items()),
+                key=lambda r: -r["roll_total"]
+            )
+            encounter_orders.append({"encounter_num": i + 1, "rounds": max_round[i], "order": order})
+
+        return {"per_char": per_char, "encounters": encounter_orders}
 
     def _extract_session_data(self, rolls: list[dict], all_chars: list, all_npcs: list,
                                start: datetime = None, end: datetime = None) -> dict:
@@ -3280,18 +3465,9 @@ class SessionExporter:
         # starts when the scene changes or when there's a >30-minute gap
         # since the last roll. data/combats is unreliable (see CLAUDE.md), and
         # counting distinct scenes alone collapses two separate fights on the
-        # same map into one.
-        ENCOUNTER_GAP_MS = 30 * 60 * 1000
-        num_combats = 0
-        prev_scene  = None
-        prev_ts     = None
-        for roll in sorted(rolls, key=lambda r: r.get("ts", 0)):
-            scene = roll.get("scene")
-            ts    = roll.get("ts", 0)
-            if (prev_scene is None or scene != prev_scene
-                    or (prev_ts is not None and float(ts) - float(prev_ts) > ENCOUNTER_GAP_MS)):
-                num_combats += 1
-            prev_scene, prev_ts = scene, ts
+        # same map into one. Same source as _compute_combat_stats's encounter
+        # breakdown, so the two always agree.
+        num_combats = len(self._build_encounter_windows(rolls))
 
         for roll in rolls:
             actor_id = roll["actor_id"]
@@ -3482,7 +3658,8 @@ class SessionExporter:
                             loot: list, start: datetime, end: datetime,
                             removed: list = None,
                             ingame_date: str = None,
-                            xp_data: list = None) -> str:
+                            xp_data: list = None,
+                            combat_stats: dict = None) -> str:
         lines = [
             f"= Session: {start.strftime('%B %d, %Y')} =",
             "",
@@ -3553,6 +3730,40 @@ class SessionExporter:
             lines.append("|}")
         else:
             lines.append("* ''No enemies encountered this session.''")
+        lines.append("")
+
+        combat_stats = combat_stats or {}
+        lines.append("== Combat Stats ==")
+        encounters = combat_stats.get("encounters") or []
+        if encounters:
+            for enc in encounters:
+                round_s = f"{enc['rounds']} round{'s' if enc['rounds'] != 1 else ''}" if enc["rounds"] else "round count unknown"
+                lines.append(f"'''Encounter {enc['encounter_num']}''' ({round_s})")
+                if enc["order"]:
+                    order_s = ", ".join(
+                        f"{wiki_escape(r['name'])} ({r['roll_total']})"
+                        for r in enc["order"]
+                    )
+                    lines.append(f": Initiative order: {order_s}")
+                lines.append("")
+
+        per_char = combat_stats.get("per_char") or {}
+        if per_char:
+            lines.append('{| class="wikitable sortable" style="width:100%;"')
+            lines.append("! Character !! Total Dealt !! Total Taken !! Avg Dealt/Turn !! Avg Taken/Round")
+            for name in sorted(per_char):
+                c = per_char[name]
+                name_esc = wiki_escape(name)
+                dealt_avg = f"{c['avg_dealt_per_turn']:.1f}"  if c["avg_dealt_per_turn"]  is not None else "—"
+                taken_avg = f"{c['avg_taken_per_round']:.1f}" if c["avg_taken_per_round"] is not None else "—"
+                lines += [
+                    "|-",
+                    f"| [[Characters/{name_esc}|{name_esc}]] || {c['total_dealt']} || {c['total_taken']} "
+                    f"|| {dealt_avg} || {taken_avg}",
+                ]
+            lines.append("|}")
+        elif not encounters:
+            lines.append("* ''No combat data recorded this session.''")
         lines.append("")
 
         def _char_cell(entry: dict) -> str:
@@ -3632,6 +3843,12 @@ class SessionExporter:
         xp_data = self._compute_xp(all_chars, session_data["characters_present"])
         print(f"  XP changes:         {len(xp_data)}")
 
+        char_by_id    = {c["id"]: c["name"] for c in all_chars if c.get("id")}
+        npc_by_id     = {n["id"]: n for n in self.full_exporter.get_all_npcs() if n.get("id")}
+        combat_stats  = self._compute_combat_stats(rolls, start, end, char_by_id, npc_by_id)
+        print(f"  Combat stats:       {len(combat_stats['per_char'])} character(s), "
+              f"{len(combat_stats['encounters'])} encounter(s) with initiative data")
+
         # ── Skip page creation if no meaningful activity occurred ──────────
         has_activity = (
             len(session_data["characters_present"])  > 0 or
@@ -3652,7 +3869,8 @@ class SessionExporter:
         if ingame_date:
             print(f"  In-game date:       {ingame_date}")
 
-        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed, ingame_date, xp_data)
+        markup     = self.render_session_page(date_str, session_data, loot, start, end, removed,
+                                              ingame_date, xp_data, combat_stats)
         page_title = f"Sessions/{date_str}"
         page       = site.pages[page_title]
         current    = page.text()
