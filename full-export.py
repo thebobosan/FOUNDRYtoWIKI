@@ -117,6 +117,27 @@ def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
             f'alt="{alt_attr}" style="vertical-align:middle;" /></html>')
 
 
+def wiki_tooltip(name: str, desc_plain: str = "", max_len: int = 600) -> str:
+    """
+    Render an item name as inline HTML with a native browser tooltip (the
+    'title' attribute) showing its description, instead of a MediaWiki
+    [[link]] to a per-item page that doesn't exist. Requires $wgRawHtml =
+    true, same as wiki_img.
+
+    desc_plain must already be plain text (e.g. via strip_html) — a title
+    attribute renders as literal text, so wikitext/HTML markup would show
+    up as raw '''/[[ ]]/<tags> in the tooltip rather than being rendered.
+    """
+    name_esc = html.escape(name, quote=True)
+    text = (desc_plain or "").strip()
+    if not text:
+        return f'<html><span title="{name_esc}">{name_esc}</span></html>'
+    if len(text) > max_len:
+        text = text[:max_len].rstrip() + "…"
+    desc_esc = html.escape(text, quote=True)
+    return f'<html><span title="{desc_esc}" style="cursor:help; border-bottom:1px dotted;">{name_esc}</span></html>'
+
+
 # Matches @UUID[...]{Label} — keep the label
 _UUID_RE = re.compile(r'@UUID\[[^\]]*\]\{([^}]+)\}')
 # Matches bare @UUID[...] with no label — drop
@@ -240,8 +261,10 @@ def strip_html(text) -> str:
         def handle_data(self, d):
             self.out.append(d)
         def handle_starttag(self, tag, _):
-            if tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "h5"):
+            if tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "h5", "tr"):
                 self.out.append("\n")
+            elif tag in ("td", "th"):
+                self.out.append(" ")
         def result(self):
             return re.sub(r'\n{3,}', '\n\n', "".join(self.out)).strip()
 
@@ -2362,9 +2385,12 @@ class FullExporter:
                 pnode = s.get("price", {}).get("value", {}) if isinstance(s.get("price"), dict) else {}
                 price = ", ".join(f"{pnode[c]} {c}" for c in ("pp","gp","sp","cp")
                                   if isinstance(pnode, dict) and pnode.get(c)) or "—"
-                img   = icon_url(item.get("img", ""), itype)
+                img       = icon_url(item.get("img", ""), itype)
+                desc_node = s.get("description") or {}
+                desc_raw  = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
+                desc_plain = strip_html(desc_raw)
                 lines.append("|-")
-                lines.append(f"| {wiki_img(img, 24, name)} || [[{wiki_escape(name)}]] || {qty} || {bulk} || {lvl} || {price}")
+                lines.append(f"| {wiki_img(img, 24, name)} || {wiki_tooltip(name, desc_plain)} || {qty} || {bulk} || {lvl} || {price}")
                 if itype == "backpack" and item.get("_id") in cont_contents:
                     lines.append("|-")
                     lines.append('| colspan="6" |')
@@ -2379,21 +2405,24 @@ class FullExporter:
             visited = set()
         lines = []
         for item in cont.get(cid, []):
-            s     = item.get("system") or {}
-            name  = item.get("name", "Unknown")
-            qty   = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
-            qty_s = f" ×{qty}" if qty > 1 else ""
-            img   = icon_url(item.get("img", ""), item.get("type", ""))
-            icon_s = wiki_img(img, 16, name) + " " if img else ""
-            bullet = "*" * depth
+            s          = item.get("system") or {}
+            name       = item.get("name", "Unknown")
+            qty        = _int(s.get("quantity", 1) if isinstance(s, dict) else 1)
+            qty_s      = f" ×{qty}" if qty > 1 else ""
+            img        = icon_url(item.get("img", ""), item.get("type", ""))
+            icon_s     = wiki_img(img, 16, name) + " " if img else ""
+            desc_node  = s.get("description") or {}
+            desc_raw   = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
+            name_html  = wiki_tooltip(name, strip_html(desc_raw))
+            bullet     = "*" * depth
             if item.get("type") == "backpack":
-                lines.append(f"{bullet} {icon_s}'''{wiki_escape(name)}'''")
+                lines.append(f"{bullet} {icon_s}'''{name_html}'''")
                 child_id = item.get("_id")
                 if child_id and child_id not in visited:
                     visited.add(child_id)
                     lines.extend(self._render_container_tree(child_id, cont, depth + 1, visited))
             else:
-                lines.append(f"{bullet} {icon_s}{wiki_escape(name)}{qty_s}")
+                lines.append(f"{bullet} {icon_s}{name_html}{qty_s}")
         return lines
 
     @staticmethod
