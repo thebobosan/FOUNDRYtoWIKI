@@ -1551,9 +1551,11 @@ class FullExporter:
         ancestry/class items plus conMod.
 
         Formula: ancestryHP + level * (classHP + conMod), plus any flat HP
-        rule bonuses (e.g. the Toughness feat) expressed as a literal int.
-        Rule values given as roll-formula strings (e.g. "@actor.level") are
-        skipped — evaluating arbitrary Foundry formulas is out of scope.
+        rule bonuses expressed as a literal int, or as the "@actor.level"
+        formula (special-cased since it's the Toughness feat's formula and
+        one of the most commonly taken PF2e feats). Other roll-formula
+        strings are skipped — evaluating arbitrary Foundry formulas is out
+        of scope.
         """
         ancestry_hp = 0
         class_hp    = 0
@@ -1585,6 +1587,10 @@ class FullExporter:
                 value = rule.get("value")
                 if isinstance(value, (int, float)):
                     bonus += _int(value)
+                elif value == "@actor.level":
+                    # Common single-variable formula (e.g. the Toughness feat);
+                    # other formula strings remain out of scope.
+                    bonus += level
 
         base = ancestry_hp + level * (class_hp + con_mod) + bonus
         return max(base, hp_val)
