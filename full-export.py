@@ -840,7 +840,8 @@ class FullExporter:
                     continue
 
                 ts = m.get("timestamp", 0)
-                if isinstance(target, dict) and self._uuid_to_token_id(target.get("token", "")) == tid:
+                if (isinstance(target, dict) and ctx.get("type") in ("attack-roll", "damage-roll")
+                        and self._uuid_to_token_id(target.get("token", "")) == tid):
                     if best is None or ts > best[0]:
                         best = (ts, atk_id)
                 elif (isinstance(applied, dict) and not applied.get("isHealing")
