@@ -822,10 +822,15 @@ class FullExporter:
 
             # Source B: context.target on attack/damage roll messages.
             # Captures all attacks regardless of how damage is applied.
-            # Skip healing rolls (e.g. healing spells, Aid) to avoid crediting
-            # a healer as the one who downed a PC.
+            # Restricted to actual attack/damage rolls (matching
+            # _build_npc_kill_events) — context.target also shows up on
+            # saving throws and skill checks rolled against a target, which
+            # deal no damage and shouldn't count as a "hit" for downing
+            # attribution. isHealing check kept too, to avoid crediting a
+            # healer as the one who downed a PC.
             ctx = pf.get("context") or {}
-            if isinstance(ctx, dict) and not ctx.get("isHealing"):
+            if (isinstance(ctx, dict) and not ctx.get("isHealing")
+                    and ctx.get("type") in ("attack-roll", "damage-roll")):
                 target = ctx.get("target") or pf.get("target") or {}
                 if isinstance(target, dict):
                     raw_target = target.get("actor", "")
