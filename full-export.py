@@ -1564,8 +1564,13 @@ class FullExporter:
             elif itype == "class":
                 class_hp = _int((item.get("system") or {}).get("hp", 0))
 
+        _PHYSICAL = {"weapon","armor","shield","consumable","ammo",
+                     "equipment","treasure","backpack","kit"}
+
         bonus = 0
         for item in items:
+            if item.get("type") in _PHYSICAL and not self._is_equipped(item):
+                continue
             for rule in (item.get("system") or {}).get("rules") or []:
                 if not isinstance(rule, dict):
                     continue
@@ -1574,6 +1579,8 @@ class FullExporter:
                 selector = rule.get("selector") or rule.get("property")
                 selectors = selector if isinstance(selector, list) else [selector]
                 if not any(s in ("hp", "hp-max") for s in selectors):
+                    continue
+                if not self._rule_applies(rule, level):
                     continue
                 value = rule.get("value")
                 if isinstance(value, (int, float)):
