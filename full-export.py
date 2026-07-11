@@ -4197,16 +4197,28 @@ class SessionExporter:
             len(loot)                                 > 0 or
             len(xp_data)                              > 0
         )
+        # A --session-date rebuild targets a past window; the world's CURRENT
+        # inventory/in-game-date have nothing to do with that day. Saving a
+        # snapshot here would mislabel today's state as date_str's, clobbering
+        # the one archival artifact that could make a future rebuild of that
+        # day correct (and re-baselining snapshot_latest against today's
+        # state right after diffing against it above). Skip both for rebuilds.
+        is_rebuild = start_date is not None
+
         if not has_activity:
             print(f"  –  No activity detected — skipping session page for {date_str}.")
-            # Still save snapshot so next run has an accurate baseline
-            self._save_snapshot(inventory_entities, date_str)
+            if not is_rebuild:
+                # Still save snapshot so next run has an accurate baseline
+                self._save_snapshot(inventory_entities, date_str)
             return
 
-        # Save snapshot for next run's diff
-        self._save_snapshot(inventory_entities, date_str)
+        if not is_rebuild:
+            # Save snapshot for next run's diff
+            self._save_snapshot(inventory_entities, date_str)
+        else:
+            print(f"  –  Rebuild of a past window — snapshot not re-saved.")
 
-        ingame_date = self._read_ingame_date()
+        ingame_date = None if is_rebuild else self._read_ingame_date()
         if ingame_date:
             print(f"  In-game date:       {ingame_date}")
 
