@@ -2232,7 +2232,7 @@ class FullExporter:
             if val in ("L", "l"):        return 0.1
             if val in ("-", "", None):   return 0.0
             try:    return float(val)
-            except: return 0.0
+            except (TypeError, ValueError): return 0.0
 
         _PHYSICAL = {"weapon","armor","shield","consumable","ammo",
                      "equipment","treasure","backpack","kit"}
