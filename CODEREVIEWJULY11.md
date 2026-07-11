@@ -75,7 +75,7 @@ This is a known, documented limitation (formula-string rule values are explicitl
 
 ---
 
-### 8. Item/character names interpolated into wikitext unescaped — table corruption / limited injection
+### 8. ✅ FIXED Item/character names interpolated into wikitext unescaped — table corruption / limited injection
 **Confirmed by: Agents 1 & 3 | Lines: throughout rendering, e.g. `_section_inventory` ~2233–2245, `render_character_page` ~2610–2613**
 
 Names flow straight into wikitable rows and `[[links]]` (e.g. `f"| {wiki_img(...)} || [[{name}]] || ..."`) with no escaping of MediaWiki metacharacters. A name containing a literal `|` breaks the table row (extra/misaligned cells); a name containing `[[`/`]]` or `{{...}}` breaks the link or triggers template transclusion (e.g. `{{PAGENAME}}`). Since Foundry item/character names are freely player-editable, this is a real (lower-severity than #2, since it stays within wikitext rather than raw HTML/JS) correctness and limited-injection issue.
