@@ -93,8 +93,9 @@ def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
     """
     if not url:
         return ""
-    alt_attr = alt.replace('"', "&quot;") if alt else ""
-    return (f'<html><img src="{url}" width="{size}" height="{size}" '
+    alt_attr = html.escape(alt, quote=True) if alt else ""
+    url_attr = html.escape(url, quote=True)
+    return (f'<html><img src="{url_attr}" width="{size}" height="{size}" '
             f'alt="{alt_attr}" style="vertical-align:middle;" /></html>')
 
 
