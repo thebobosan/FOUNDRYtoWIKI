@@ -3625,7 +3625,7 @@ class SessionExporter:
             if not (m.get("flags") or {}).get("core", {}).get("initiativeRoll"):
                 continue
             ts = m.get("timestamp", 0)
-            if not (start_ms <= float(ts) <= end_ms):
+            if not (start_ms <= float(ts) < end_ms):
                 continue
             spk      = m.get("speaker") or {}
             actor_id = spk.get("actor", "")
@@ -3756,7 +3756,7 @@ class SessionExporter:
 
         for m in fe._load_raw_messages():
             ts = m.get("timestamp", 0)
-            if not (start_ms <= float(ts) <= end_ms):
+            if not (start_ms <= float(ts) < end_ms):
                 continue
             widx = _window_for_ts(ts)
             if widx is None:
@@ -3887,7 +3887,7 @@ class SessionExporter:
             for ev in self.full_exporter._build_npc_kill_events():
                 vic_token_id = ev.get("victim_id", "")
                 ts           = ev.get("ts", 0)
-                if vic_token_id in seen_tokens and start_ms <= float(ts) <= end_ms:
+                if vic_token_id in seen_tokens and start_ms <= float(ts) < end_ms:
                     killed_token_ids.add(vic_token_id)
 
         for enemy in enemies_encountered:
