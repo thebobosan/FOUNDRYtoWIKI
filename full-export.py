@@ -1501,12 +1501,29 @@ class FullExporter:
 
     # ── Item helpers ──────────────────────────────────────────────────────
 
+    _COIN_SLUGS   = {"gold-pieces", "silver-pieces", "copper-pieces", "platinum-pieces"}
+    _COIN_NAME_RE = re.compile(r'^(platinum|gold|silver|copper)\s+pieces$', re.IGNORECASE)
+
     @staticmethod
     def _is_coin_item(item: dict) -> bool:
-        """True when a treasure item represents actual currency (1 coin per unit, single denomination)."""
+        """
+        True when a treasure item represents actual currency, not just any
+        treasure priced at exactly 1 coin of a single denomination (a 1 gp
+        gem would otherwise false-positive on that price pattern alone).
+        """
         if item.get("type") != "treasure":
             return False
-        price = (item.get("system") or {}).get("price") or {}
+        isys = item.get("system") or {}
+        slug = isys.get("slug") or ""
+        if isys.get("stackGroup") == "coins" or slug in FullExporter._COIN_SLUGS:
+            return True
+        # No reliable slug/stackGroup (e.g. a homebrew coin item) — fall back
+        # to the price-pattern heuristic, but only for something that also
+        # looks like currency by name, so real 1-coin-priced treasure isn't
+        # swept in.
+        if not FullExporter._COIN_NAME_RE.match((item.get("name") or "").strip()):
+            return False
+        price = isys.get("price") or {}
         if not isinstance(price, dict):
             return False
         if _int(price.get("per", 1)) != 1:
