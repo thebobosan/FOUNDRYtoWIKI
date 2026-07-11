@@ -601,30 +601,44 @@ class FullExporter:
                     seen.add(key); deduped.append(entry)
             hit_history[vid] = sorted(deduped, key=lambda e: e[0])
 
-        # ── Pass 2: find dying condition messages; attribute via damage history ─
-        events = []
+        # ── Pass 2: find downing signals; attribute via damage history ─────────
+        # Two independent signal sources, since not every downing gets a
+        # public broadcast card (e.g. it may happen off a roll with no
+        # subsequent condition announcement):
+        #   A. Dying/Unconscious condition cards — plain HTML, no pf2e flags,
+        #      carry the condition name in a <span class="name"> tag.
+        #   B. Any pf2e-flagged message's context.options, which snapshot the
+        #      roller's active conditions at roll time (e.g. a self-heal
+        #      rolled while still Dying/Unconscious). This catches downings
+        #      that never produced a condition card at all.
+        down_signals = []   # (ts, victim_id)
         for m in raw_msgs:
-            # Dying condition cards have no pf2e flags and carry the condition
-            # name in their HTML content.
             pf = (m.get("flags") or {}).get("pf2e") or {}
-            if pf:
-                continue   # structured messages are not condition cards
+            ts = m.get("timestamp", 0)
 
-            content = m.get("content", "")
-            # Match against applied condition *names* only, not the full HTML
-            # blob — condition tooltips carry full rules text (e.g. Wounded's
-            # tooltip mentions "unconscious" in prose), which false-positives
-            # a raw content search.
-            condition_names = re.findall(r'<span class="name">(.*?)</span>', content)
-            if not any(_DYING_RE.search(n) for n in condition_names):
-                continue
+            if not pf:
+                content = m.get("content", "")
+                # Match against applied condition *names* only, not the full
+                # HTML blob — condition tooltips carry full rules text (e.g.
+                # Wounded's tooltip mentions "unconscious" in prose), which
+                # false-positives a raw content search.
+                condition_names = re.findall(r'<span class="name">(.*?)</span>', content)
+                if any(_DYING_RE.search(n) for n in condition_names):
+                    victim_id = (m.get("speaker") or {}).get("actor", "")
+                    if victim_id:
+                        down_signals.append((ts, victim_id))
+            else:
+                ctx  = pf.get("context") or {}
+                opts = ctx.get("options") or []
+                if any(o.startswith("self:condition:dying") or o.startswith("self:condition:unconscious")
+                       for o in opts):
+                    victim_id = ctx.get("actor") or (m.get("speaker") or {}).get("actor", "")
+                    if victim_id:
+                        down_signals.append((ts, victim_id))
 
-            spk       = m.get("speaker") or {}
-            victim_id = spk.get("actor", "")
-            if not victim_id:
-                continue
+        events = []
+        for ts, victim_id in down_signals:
             victim_name = name_by_actor.get(victim_id, "")
-            ts          = m.get("timestamp", 0)
 
             # Find most recent hit on this victim BEFORE this timestamp.
             # Sort by (timestamp, insertion index) so ties resolve deterministically.
@@ -647,6 +661,7 @@ class FullExporter:
                 "ts":            ts,
             })
 
+        events.sort(key=lambda e: e["ts"])
         print(f"  Combat record: {len(events)} downing event(s) found "
               f"(from {len(hit_history)} actors with hit history).")
         return events
