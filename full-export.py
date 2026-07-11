@@ -483,16 +483,21 @@ class FullExporter:
             "last_downed_by": {"name": attacker, "ts": ms} or None,
         }
 
-        A "downing event" is any appliedDamage message whose HP update drives
-        a token to <= 0. The attacker is the origin.actor of that damage; the
-        victim is the actor the damage was applied to. Self-inflicted and
-        sourceless damage produce a downed-by entry with no false attacker.
+        Merges two event sources, sorted chronologically so the most recent
+        event wins per actor:
+          - PC downing events (see _build_downing_events) — a PC actually
+            going to the Dying/Unconscious condition, attributed to the
+            attacker's last hit before the condition card.
+          - NPC kill events (see _build_npc_kill_events) — an NPC token's
+            ActorDelta HP reaching <= 0, attributed to the last hit recorded
+            against that token anywhere in the chat log.
         """
         if self._combat_record is not None:
             return self._combat_record
 
         record: dict = {}
-        events = self._build_downing_events()
+        events = self._build_downing_events() + self._build_npc_kill_events()
+        events.sort(key=lambda e: e["ts"])
 
         for ev in events:   # events are chronological (ascending ts)
             atk_id, atk_name = ev["attacker_id"], ev["attacker_name"]
@@ -541,44 +546,8 @@ class FullExporter:
             print("  ⚠  No messages database — combat record unavailable.")
             return []
 
-        # Build actor id → name map from actors DB
-        name_by_actor: dict[str, str] = {}
-        with self.actors_db.iterator() as it:
-            for key, raw in it:
-                if not key.startswith(b"!actors!"):
-                    continue
-                try:
-                    a = json.loads(raw)
-                except Exception:
-                    continue
-                if isinstance(a, dict) and a.get("_id"):
-                    name_by_actor[a["_id"]] = a.get("name", "Unknown")
-
-        # Load all messages
-        tmp      = tempfile.mkdtemp()
-        tmp_path = Path(tmp) / "messages"
-        raw_msgs = []
-        msg_errors = 0
-        try:
-            shutil.copytree(str(messages_path), str(tmp_path))
-            db = plyvel.DB(str(tmp_path))
-            with db:
-                for k, v in db:
-                    parts = k.decode("utf-8", "replace").split("!")
-                    if len(parts) not in (2, 3):
-                        continue
-                    try:
-                        m = json.loads(v)
-                        if isinstance(m, dict):
-                            raw_msgs.append(m)
-                    except Exception:
-                        msg_errors += 1
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-        if msg_errors:
-            print(f"  ⚠  {msg_errors} chat messages failed to parse and were skipped")
-
-        raw_msgs.sort(key=lambda m: m.get("timestamp", 0))
+        name_by_actor, _ = self._actor_maps()
+        raw_msgs         = self._load_raw_messages()
 
         # ── Pass 1: build hit history per victim ─────────────────────────────
         # Two attribution sources:
@@ -642,7 +611,12 @@ class FullExporter:
                 continue   # structured messages are not condition cards
 
             content = m.get("content", "")
-            if not _DYING_RE.search(content):
+            # Match against applied condition *names* only, not the full HTML
+            # blob — condition tooltips carry full rules text (e.g. Wounded's
+            # tooltip mentions "unconscious" in prose), which false-positives
+            # a raw content search.
+            condition_names = re.findall(r'<span class="name">(.*?)</span>', content)
+            if not any(_DYING_RE.search(n) for n in condition_names):
                 continue
 
             spk       = m.get("speaker") or {}
@@ -690,6 +664,184 @@ class FullExporter:
         # Take the segment immediately after the last "Actor."
         tail = uuid.rsplit("Actor.", 1)[1]
         return tail.split(".")[0] if tail else ""
+
+    @staticmethod
+    def _uuid_to_token_id(uuid: str) -> str:
+        """
+        Extract the token id from a Foundry document UUID.
+        "Scene.x.Token.y.Actor.abc" → "y"
+        Returns "" if no Token segment present.
+        """
+        if not uuid or "Token." not in uuid:
+            return ""
+        tail = uuid.split("Token.", 1)[1]
+        return tail.split(".")[0] if tail else ""
+
+    def _actor_maps(self) -> tuple:
+        """Build actor id → name and actor id → type maps from the actors DB."""
+        name_by_actor: dict[str, str] = {}
+        type_by_actor: dict[str, str] = {}
+        with self.actors_db.iterator() as it:
+            for key, raw in it:
+                if not key.startswith(b"!actors!"):
+                    continue
+                try:
+                    a = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(a, dict) and a.get("_id"):
+                    name_by_actor[a["_id"]] = a.get("name", "Unknown")
+                    type_by_actor[a["_id"]] = a.get("type", "")
+        return name_by_actor, type_by_actor
+
+    def _load_raw_messages(self) -> list:
+        """Copy the messages LevelDB to a temp dir and load all documents, chronologically."""
+        messages_path = self.world_path / "data" / "messages"
+        if not messages_path.exists():
+            return []
+
+        tmp        = tempfile.mkdtemp()
+        tmp_path   = Path(tmp) / "messages"
+        raw_msgs   = []
+        msg_errors = 0
+        try:
+            shutil.copytree(str(messages_path), str(tmp_path))
+            db = plyvel.DB(str(tmp_path))
+            with db:
+                for k, v in db:
+                    parts = k.decode("utf-8", "replace").split("!")
+                    if len(parts) not in (2, 3):
+                        continue
+                    try:
+                        m = json.loads(v)
+                        if isinstance(m, dict):
+                            raw_msgs.append(m)
+                    except Exception:
+                        msg_errors += 1
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if msg_errors:
+            print(f"  ⚠  {msg_errors} chat messages failed to parse and were skipped")
+
+        raw_msgs.sort(key=lambda m: m.get("timestamp", 0))
+        return raw_msgs
+
+    def _build_npc_kill_events(self) -> list:
+        """
+        Build a list of NPC-kill events using the per-token ActorDelta HP
+        override in the scenes DB as ground truth for "is this NPC dead".
+
+        Chat messages alone can't detect most NPC deaths: NPCs don't get a
+        Dying/Unconscious condition card (that's a PC-only mechanic), and the
+        killing blow is often applied by dragging the token's HP bar to 0
+        directly rather than via the chat "Apply Damage" button — which
+        leaves no trace in the message log. But every unlinked token has its
+        own ActorDelta document overriding HP for that specific instance
+        (independent of the shared base Actor, which GMs frequently reuse/
+        reset as a stat-block template across encounters), so a token's
+        current delta HP <= 0 is a reliable "this instance died" signal.
+
+        Attribution: the last hit recorded against that specific token id
+        anywhere in the chat log (via context.target.token or
+        appliedDamage.uuid), since token ids are unique per encounter
+        instance — unlike actor ids, which multiple simultaneous copies of
+        the same monster type (e.g. 5 Cave Scorpion tokens) can share.
+        """
+        scenes_path = self.world_path / "data" / "scenes"
+        if not scenes_path.exists():
+            return []
+
+        name_by_actor, type_by_actor = self._actor_maps()
+
+        tmp      = tempfile.mkdtemp()
+        tmp_path = Path(tmp) / "scenes"
+        base_tokens: dict[str, dict] = {}   # token_id → {name, actorId}
+        deltas:      dict[str, dict] = {}   # token_id → {hp, type}
+        try:
+            shutil.copytree(str(scenes_path), str(tmp_path))
+            db = plyvel.DB(str(tmp_path))
+            with db:
+                for k, v in db:
+                    ks = k.decode("utf-8", "replace")
+                    try:
+                        if ks.startswith("!scenes.tokens!"):
+                            token_id = ks.split("!")[-1].split(".")[-1]
+                            doc = json.loads(v)
+                            if isinstance(doc, dict):
+                                base_tokens[token_id] = {
+                                    "name":    doc.get("name"),
+                                    "actorId": doc.get("actorId"),
+                                }
+                        elif ks.startswith("!scenes.tokens.delta!"):
+                            token_id = ks.split("!")[-1].split(".")[1]
+                            doc = json.loads(v)
+                            if isinstance(doc, dict):
+                                hp = ((doc.get("system") or {}).get("attributes") or {}).get("hp")
+                                deltas[token_id] = {
+                                    "hp":   hp.get("value") if isinstance(hp, dict) else None,
+                                    "type": doc.get("type"),
+                                }
+                    except Exception:
+                        continue
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        dead_npc_tokens = []
+        for tid, base in base_tokens.items():
+            actor_id = base.get("actorId")
+            delta    = deltas.get(tid, {})
+            dtype    = delta.get("type") or type_by_actor.get(actor_id, "")
+            if dtype != "npc":
+                continue
+            hp = delta.get("hp")
+            if hp is not None and hp <= 0:
+                dead_npc_tokens.append((tid, base))
+
+        if not dead_npc_tokens:
+            return []
+
+        raw_msgs = self._load_raw_messages()
+
+        events = []
+        for tid, base in dead_npc_tokens:
+            actor_id     = base.get("actorId")
+            display_name = base.get("name") or name_by_actor.get(actor_id, "Unknown")
+
+            best = None
+            for m in raw_msgs:
+                pf      = (m.get("flags") or {}).get("pf2e") or {}
+                ctx     = pf.get("context") or {}
+                target  = ctx.get("target") or pf.get("target") or {}
+                applied = pf.get("appliedDamage") or {}
+                origin  = pf.get("origin") or {}
+                atk_id  = self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+                if not atk_id or atk_id == actor_id:
+                    continue
+
+                ts = m.get("timestamp", 0)
+                if isinstance(target, dict) and self._uuid_to_token_id(target.get("token", "")) == tid:
+                    if best is None or ts > best[0]:
+                        best = (ts, atk_id)
+                elif (isinstance(applied, dict) and not applied.get("isHealing")
+                      and self._uuid_to_token_id(applied.get("uuid", "")) == tid):
+                    if best is None or ts > best[0]:
+                        best = (ts, atk_id)
+
+            if best is None:
+                continue
+            ts, atk_id = best
+            events.append({
+                "attacker_id":   atk_id,
+                "attacker_name": name_by_actor.get(atk_id, ""),
+                "victim_id":     tid,
+                "victim_name":   display_name,
+                "source_label":  "",
+                "ts":            ts,
+            })
+
+        print(f"  Combat record: {len(events)} NPC kill(s) found "
+              f"(from {len(dead_npc_tokens)} dead NPC token(s)).")
+        return sorted(events, key=lambda e: e["ts"])
 
     # ── LevelDB helpers ───────────────────────────────────────────────────
 
@@ -1467,6 +1619,10 @@ class FullExporter:
 
         coin_total = 0
         noncoin_bulk = 0.0
+        # container_id -> raw Bulk of its direct contents, for the stowing
+        # reduction below (e.g. a Backpack ignores the first 2 Bulk of its
+        # contents; a Bag of Holding ignores up to its full capacity).
+        contained_bulk_by_container: dict[str, float] = {}
         for i in items:
             if i.get("type") not in _PHYSICAL:
                 continue
@@ -1475,10 +1631,28 @@ class FullExporter:
             qty = _int(qty_raw.get("value", 1) if isinstance(qty_raw, dict) else qty_raw)
             if self._is_coin_item(i):
                 coin_total += qty
-            else:
-                noncoin_bulk += _item_bulk(i) * qty
+                continue
+            item_bulk = _item_bulk(i) * qty
+            noncoin_bulk += item_bulk
+            cid = isys.get("containerId")
+            if cid:
+                contained_bulk_by_container[cid] = contained_bulk_by_container.get(cid, 0.0) + item_bulk
 
-        bulk_current = round(noncoin_bulk + coin_total // 1000, 1)
+        # Apply each stowing container's Bulk reduction to its direct contents.
+        for i in items:
+            if i.get("type") != "backpack":
+                continue
+            isys = i.get("system") or {}
+            if not isys.get("stowing"):
+                continue
+            bulk_field = isys.get("bulk") or {}
+            ignored = float(bulk_field.get("ignored", 0) or 0) if isinstance(bulk_field, dict) else 0.0
+            if ignored <= 0:
+                continue
+            contained = contained_bulk_by_container.get(i.get("_id", ""), 0.0)
+            noncoin_bulk -= min(contained, ignored)
+
+        bulk_current = round(max(noncoin_bulk, 0.0) + coin_total // 1000, 1)
         str_mod  = abilities.get("str", 0)
         bulk_enc = 5 + str_mod
         bulk_max = 10 + str_mod
@@ -1965,6 +2139,26 @@ class FullExporter:
                 lines.append(f"{bullet} {icon_s}{name}{qty_s}")
         return lines
 
+    @staticmethod
+    def _spell_desc_block(desc: str) -> str:
+        """
+        Collapsible description shown beneath a spell's bullet line.
+
+        Rendered as a standalone indented div rather than a list continuation:
+        multi-paragraph descriptions would break out of a wikitext list, but a
+        block-level div renders them intact. Each spell has its own `*` line,
+        so the interrupted list simply restarts on the next spell.
+        """
+        return (
+            '<div class="toccolours mw-collapsible mw-collapsed" '
+            'style="margin-left:2em; font-size:95%;">\n'
+            "''Description''\n"
+            '<div class="mw-collapsible-content">\n'
+            f"{desc}\n"
+            "</div>\n"
+            "</div>"
+        )
+
     def _section_spells(self, char: dict) -> str:
         entries = char.get("spell_entries", [])
         orphans = char.get("orphan_spells", [])
@@ -1995,6 +2189,8 @@ class FullExporter:
                     icon_s  = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
                     trait_s = (" <small>[" + ", ".join(spell["traits"]) + "]</small>") if spell["traits"] else ""
                     lines.append(f"* {icon_s}[[{spell['name']}]]{trait_s}")
+                    if spell.get("desc"):
+                        lines.append(self._spell_desc_block(spell["desc"]))
             lines.append("")
 
         if orphans:
@@ -2002,6 +2198,8 @@ class FullExporter:
             for spell in sorted(orphans, key=lambda s: (_int(s["rank"], 99), s["name"])):
                 icon_s = wiki_img(spell["img"], 18, spell["name"]) + " " if spell.get("img") else ""
                 lines.append(f"* {icon_s}[[{spell['name']}]]")
+                if spell.get("desc"):
+                    lines.append(self._spell_desc_block(spell["desc"]))
             lines.append("")
 
         return "\n".join(lines)
@@ -2670,7 +2868,8 @@ class SessionExporter:
 
         return rolls
 
-    def _extract_session_data(self, rolls: list[dict], all_chars: list, all_npcs: list) -> dict:
+    def _extract_session_data(self, rolls: list[dict], all_chars: list, all_npcs: list,
+                               start: datetime = None, end: datetime = None) -> dict:
         char_by_id = {c["id"]: c["name"] for c in all_chars if c.get("id")}
         npc_by_id  = {n["id"]: n for n in all_npcs if n.get("id")}
 
@@ -2689,11 +2888,29 @@ class SessionExporter:
             elif actor_id in npc_by_id and actor_id not in seen_enemies:
                 seen_enemies.add(actor_id)
                 npc = npc_by_id[actor_id]
-                enemies_encountered.append({"name": npc["name"], "img": npc.get("portrait", "")})
+                enemies_encountered.append({"id": actor_id, "name": npc["name"],
+                                             "img": npc.get("portrait", ""), "killed": False})
+
+        # Enemies killed: downing events (dying/unconscious condition cards)
+        # within the session window whose victim is an NPC.
+        killed_npc_ids: set[str] = set()
+        if start is not None and end is not None:
+            start_ms = start.timestamp() * 1000
+            end_ms   = end.timestamp()   * 1000
+            for ev in self.full_exporter._build_downing_events():
+                vic_id = ev.get("victim_id", "")
+                ts     = ev.get("ts", 0)
+                if vic_id in npc_by_id and start_ms <= float(ts) <= end_ms:
+                    killed_npc_ids.add(vic_id)
+
+        for enemy in enemies_encountered:
+            if enemy["id"] in killed_npc_ids:
+                enemy["killed"] = True
 
         return {
             "characters_present":  sorted(characters_present),
             "enemies_encountered": enemies_encountered,
+            "enemies_killed":      len(killed_npc_ids),
             "num_combats":         len(scenes),
         }
 
@@ -2888,18 +3105,30 @@ class SessionExporter:
                 average = total / n_present
                 lines.append("")
                 lines.append(f"''Average XP this session (total gained ÷ characters present): "
-                             f"{average:.1f}'' — use this if a character's entry looks off.")
+                             f"{average:.1f}''")
         else:
             lines.append("* ''No XP change recorded this session.''")
         lines.append("")
 
         lines.append("== Enemies Encountered ==")
         if session_data["enemies_encountered"]:
+            n_encountered = len(session_data["enemies_encountered"])
+            n_killed      = session_data["enemies_killed"]
+            lines.append(f"''{n_killed} of {n_encountered} enem{'y' if n_encountered == 1 else 'ies'} killed this session.''")
+            lines.append("")
             lines.append('{| class="wikitable" style="width:100%;"')
-            lines.append("! !! Enemy")
-            for enemy in sorted(session_data["enemies_encountered"], key=lambda e: e["name"]):
-                icon_s = wiki_img(enemy["img"], 24, enemy["name"]) if enemy.get("img") else ""
-                lines += ["|-", f"| {icon_s} || {enemy['name']}"]
+            lines.append("! !! Enemy !! Killed")
+            grouped: dict[str, dict] = {}
+            for enemy in session_data["enemies_encountered"]:
+                g = grouped.setdefault(enemy["name"], {"img": enemy.get("img", ""),
+                                                         "count": 0, "killed": 0})
+                g["count"] += 1
+                if enemy.get("killed"):
+                    g["killed"] += 1
+            for name, g in sorted(grouped.items()):
+                icon_s = wiki_img(g["img"], 24, name) if g["img"] else ""
+                name_s = name if g["count"] == 1 else f"{name} x{g['count']}"
+                lines += ["|-", f"| {icon_s} || {name_s} || {g['killed']}/{g['count']}"]
             lines.append("|}")
         else:
             lines.append("* ''No enemies encountered this session.''")
@@ -2961,9 +3190,11 @@ class SessionExporter:
         rolls = self._read_initiative_rolls(start, end)
         print(f"  Initiative rolls in window: {len(rolls)}")
 
-        session_data = self._extract_session_data(rolls, all_chars, self.full_exporter.get_all_npcs())
+        session_data = self._extract_session_data(rolls, all_chars, self.full_exporter.get_all_npcs(),
+                                                    start, end)
         print(f"  Characters present:  {len(session_data['characters_present'])}")
-        print(f"  Enemies encountered: {len(session_data['enemies_encountered'])}")
+        print(f"  Enemies encountered: {len(session_data['enemies_encountered'])} "
+              f"({session_data['enemies_killed']} killed)")
 
         # Party stash ('party' actor) holds shared loot not on any one character —
         # include it in inventory tracking alongside PCs.
