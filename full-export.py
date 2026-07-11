@@ -3434,18 +3434,23 @@ class SessionExporter:
 
         encounter_orders = []
         for i, win in enumerate(windows):
-            # Dedupe to each actor's first roll in this encounter (some
+            # Dedupe to each COMBATANT's first roll in this encounter (some
             # tables reroll initiative for arriving reinforcements/new
             # rounds — the seating order that actually ran the fight is
-            # each combatant's earliest roll, not every reroll).
-            first_roll_by_actor: dict[str, dict] = {}
+            # each combatant's earliest roll, not every reroll). Key by
+            # token id, not actor id: multiple simultaneous NPC tokens of
+            # the same monster type (e.g. two Crystal Claws) share one base
+            # Actor id, so deduping by actor id would wrongly collapse them
+            # into a single initiative entry.
+            first_roll_by_token: dict[str, dict] = {}
             for r in sorted(win["rolls"], key=lambda r: r.get("ts", 0)):
                 if r.get("roll_total") is None:
                     continue
-                first_roll_by_actor.setdefault(r["actor_id"], r)
+                token_id = r.get("token_id") or r["actor_id"]
+                first_roll_by_token.setdefault(token_id, r)
             order = sorted(
-                ({"name": _actor_name(actor_id), "roll_total": r["roll_total"]}
-                 for actor_id, r in first_roll_by_actor.items()),
+                ({"name": _actor_name(r["actor_id"]), "roll_total": r["roll_total"]}
+                 for r in first_roll_by_token.values()),
                 key=lambda r: -r["roll_total"]
             )
             encounter_orders.append({"encounter_num": i + 1, "rounds": max_round[i], "order": order})
