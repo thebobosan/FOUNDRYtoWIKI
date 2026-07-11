@@ -583,8 +583,9 @@ class FullExporter:
         _DYING_RE = re.compile(r'dying|unconscious', re.IGNORECASE)
 
         for m in raw_msgs:
-            pf = (m.get("flags") or {}).get("pf2e") or {}
-            ts = m.get("timestamp", 0)
+            pf     = (m.get("flags") or {}).get("pf2e") or {}
+            ts     = m.get("timestamp", 0)
+            msg_id = m.get("_id", "")
 
             # Source A: appliedDamage (button-applied damage)
             applied = pf.get("appliedDamage")
@@ -596,7 +597,7 @@ class FullExporter:
                 atk_id  = self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
                 if victim_id and atk_id and atk_id != victim_id:
                     hit_history.setdefault(victim_id, []).append(
-                        (ts, atk_id, name_by_actor.get(atk_id, ""))
+                        (ts, atk_id, name_by_actor.get(atk_id, ""), msg_id)
                     )
 
             # Source B: context.target on attack/damage roll messages.
@@ -613,16 +614,23 @@ class FullExporter:
                                  or self._uuid_to_actor_id((m.get("speaker") or {}).get("actor", "")))
                     if victim_id and atk_id and atk_id != victim_id:
                         hit_history.setdefault(victim_id, []).append(
-                            (ts, atk_id, name_by_actor.get(atk_id, ""))
+                            (ts, atk_id, name_by_actor.get(atk_id, ""), msg_id)
                         )
 
-        # Deduplicate by (ts, atk_id) and sort each actor's history
+        # Deduplicate by (msg_id, atk_id) where a message id is available —
+        # this collapses the same physical hit when both Source A and B
+        # detect it on the same message, without also collapsing two
+        # distinct simultaneous hits from the same attacker (e.g. two-weapon
+        # fighting) that happen to share a millisecond timestamp but come
+        # from different messages. Falls back to (ts, atk_id) if no message
+        # id is present.
         for vid in hit_history:
             seen, deduped = set(), []
             for entry in hit_history[vid]:
-                key = (entry[0], entry[1])
+                ts, atk_id, name, msg_id = entry
+                key = (msg_id, atk_id) if msg_id else (ts, atk_id)
                 if key not in seen:
-                    seen.add(key); deduped.append(entry)
+                    seen.add(key); deduped.append((ts, atk_id, name))
             hit_history[vid] = sorted(deduped, key=lambda e: e[0])
 
         # ── Pass 2: find downing signals; attribute via damage history ─────────
