@@ -496,6 +496,32 @@ class FullExporter:
         # and resolving token→actor names. Cached after first build.
         self._combat_record = None
 
+    # ── Wiki page name tracking (renames) ───────────────────────────────────
+
+    _PAGE_NAMES_PATH = Path("session_snapshots") / "wiki_page_names.json"
+
+    def _load_page_names(self) -> dict:
+        """
+        {"Characters": {actor_id: last-pushed page name}, "NPCs": {...}}
+
+        Wiki pages are titled after the actor's *current* name (e.g.
+        "Characters/Ashes"), but Foundry actor ids are stable across renames
+        (e.g. a player renaming "Yuki's Character" to "Ashes"). Without this
+        map, a rename silently creates a second page under the new name and
+        leaves the old one orphaned forever — this lets push_to_wiki detect
+        the rename and move the existing page instead.
+        """
+        if not self._PAGE_NAMES_PATH.exists():
+            return {}
+        try:
+            return json.loads(self._PAGE_NAMES_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_page_names(self, page_names: dict):
+        self._PAGE_NAMES_PATH.parent.mkdir(exist_ok=True)
+        self._PAGE_NAMES_PATH.write_text(json.dumps(page_names, indent=2), encoding="utf-8")
+
     # ── Combat record (last kill / last knocked unconscious) ───────────────
 
     def combat_record(self) -> dict:
@@ -2809,11 +2835,32 @@ class FullExporter:
                 return
 
         prefix  = "NPCs" if npcs else "Characters"
-        pushed = skipped = errors = 0
+        pushed = skipped = errors = renamed = 0
+
+        page_names = self._load_page_names()
+        section    = page_names.setdefault(prefix, {})
 
         for actor in actors:
-            name = actor["name"]
+            name     = actor["name"]
+            actor_id = actor.get("id")
             try:
+                # If this actor id was last pushed under a different name,
+                # move the existing page instead of creating a duplicate.
+                old_name = section.get(actor_id) if actor_id else None
+                if actor_id and old_name and old_name != name:
+                    old_page = site.pages[f"{prefix}/{old_name}"]
+                    if old_page.exists:
+                        old_page.move(f"{prefix}/{name}",
+                                      reason="Auto-sync: renamed in Foundry.",
+                                      no_redirect=False)
+                        print(f"↪  Renamed: {old_name} → {name}")
+                        renamed += 1
+                    # Record the new name immediately — the move (if any) has
+                    # already happened on the wiki regardless of whether the
+                    # content render/edit below succeeds, so tracking must
+                    # not retry the move on a later run.
+                    section[actor_id] = name
+
                 new_markup = (self.render_npc_page(actor)
                               if npcs else self.render_character_page(actor))
                 page           = site.pages[f"{prefix}/{name}"]
@@ -2824,21 +2871,26 @@ class FullExporter:
                 ):
                     print(f"  –  Skipped (no changes): {name}")
                     skipped += 1
-                    continue
+                else:
+                    page.edit(new_markup,
+                              summary=f"Auto-sync: PF2e {'NPC' if npcs else 'character'} exporter.")
+                    status = "Created" if not current_markup else "Updated"
+                    print(f"✓  {status}: {name}")
+                    pushed += 1
 
-                page.edit(new_markup,
-                          summary=f"Auto-sync: PF2e {'NPC' if npcs else 'character'} exporter.")
-                status = "Created" if not current_markup else "Updated"
-                print(f"✓  {status}: {name}")
-                pushed += 1
+                if actor_id:
+                    section[actor_id] = name
 
             except Exception as e:
                 print(f"✗  Error pushing {name}: {e}")
                 errors += 1
 
+        self._save_page_names(page_names)
+
         total = pushed + skipped + errors
         print(f"\nDone — {total} processed: "
-              f"{pushed} pushed, {skipped} skipped (unchanged), {errors} errors.")
+              f"{pushed} pushed, {skipped} skipped (unchanged), "
+              f"{renamed} renamed, {errors} errors.")
 
     def push_party_stash(self, site):
         """Push the party stash page. Accepts a shared mwclient.Site instance."""
