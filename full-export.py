@@ -2493,7 +2493,11 @@ class FullExporter:
                 val = ", ".join(str(l) for l in val)
             elif key == "keyability" and val:
                 val = str(val).upper()
-            if val:
+            # Hero Points at 0 is meaningful state (e.g. just spent them
+            # all), not missing data — match the infobox, which already
+            # shows it. Other fields keep the truthy check.
+            present = (val is not None and val != "") if key == "hero_points" else bool(val)
+            if present:
                 lines.append(f"* '''{label}:''' {val}")
         lines.append("")
 
