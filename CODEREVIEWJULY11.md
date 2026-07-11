@@ -19,7 +19,7 @@ All three agents verified this empirically against the `temporary-title` fixture
 
 ## High — Confirmed by Multiple Agents
 
-### 2. `wiki_img()` — unescaped `alt` (and `url`) enables stored XSS in raw-HTML wiki output
+### 2. ✅ FIXED `wiki_img()` — unescaped `alt` (and `url`) enables stored XSS in raw-HTML wiki output
 **Confirmed by: Agents 1 & 2 | Lines: ~89–98**
 
 `alt_attr = alt.replace('"', "&quot;")` only escapes double quotes; `<`, `>`, `&` pass through untouched into a literal `<html>...</html>` block that MediaWiki renders as raw HTML (`$wgRawHtml = true`, required for icon rendering per CLAUDE.md). `alt` is built from Foundry item/spell/feat/deity/character names, which are freely player-editable. A name containing `"><script>alert(1)</script>` breaks out of the attribute and executes for every wiki visitor — a genuine stored-XSS vector against a player-facing wiki. `url` is not escaped either.
