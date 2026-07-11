@@ -37,9 +37,24 @@ WORLD_PATH   = "/var/www/java/foundry.atkennedy.com/foundrydata/Data/worlds/temp
 FOUNDRY_DATA = "/var/www/java/foundry.atkennedy.com/foundrydata/Data"
 FOUNDRY_URL  = "https://foundry.atkennedy.com"
 
+def _read_wiki_password() -> str | None:
+    """
+    Wiki login password. Preferred source is wiki_password.txt next to this
+    script (gitignored — never commit it), since keeping an env var set
+    identically for both manual shells and cron is easy to get out of sync.
+    Falls back to the WIKI_PASSWORD env var if the file doesn't exist.
+    """
+    pw_file = Path(__file__).resolve().parent / "wiki_password.txt"
+    if pw_file.exists():
+        pw = pw_file.read_text(encoding="utf-8").strip()
+        if pw:
+            return pw
+    return os.environ.get("WIKI_PASSWORD")
+
+
 WIKI_URL      = "wiki.atkennedy.com"
 WIKI_USER     = "Oracle"
-WIKI_PASSWORD = os.environ.get("WIKI_PASSWORD")
+WIKI_PASSWORD = _read_wiki_password()
 
 COMPENDIUM_PACKS = [
     "equipment", "spells", "feats", "actions",
@@ -471,8 +486,10 @@ def make_site() -> mwclient.Site:
     """Create and return an authenticated MediaWiki site connection."""
     if not WIKI_PASSWORD:
         raise RuntimeError(
-            "WIKI_PASSWORD environment variable is not set — refusing to "
-            "connect without it. Preview/--no-push runs don't need it."
+            "No wiki password found — refusing to connect without it. Put "
+            "it in wiki_password.txt next to this script, or set the "
+            "WIKI_PASSWORD environment variable. Preview/--no-push runs "
+            "don't need it."
         )
     site = mwclient.Site(WIKI_URL, path="/")
     site.login(WIKI_USER, WIKI_PASSWORD)

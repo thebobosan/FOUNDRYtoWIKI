@@ -54,7 +54,7 @@ python full-export.py --no-compendium
 
 Dependencies: `plyvel`, `mwclient` (install via pip). Requires access to the Foundry LevelDB files on disk.
 
-Wiki password is read from the `WIKI_PASSWORD` environment variable. `make_site()` raises loudly if it's unset — there is no hardcoded fallback. Preview/non-push runs don't need it.
+Wiki password is read from `wiki_password.txt` (plain text, in the same directory as `full-export.py`, gitignored — `chmod 600` it) if present, otherwise falls back to the `WIKI_PASSWORD` environment variable. `make_site()` raises loudly if neither is set — there is no hardcoded fallback. Preview/non-push runs don't need it.
 
 ## Architecture
 

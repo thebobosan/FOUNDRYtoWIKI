@@ -1,0 +1,4 @@
+wiki_password.txt
+__pycache__/
+*.pyc
+wiki_preview/
