@@ -66,7 +66,7 @@ Unlike `_armor_alteration()` (checks `_is_equipped` + `_predicate_facts_true`) a
 
 ---
 
-### 7. `_calc_hp_max` — Toughness-style `@actor.level` formula bonus silently dropped, previously masked by the `max(base, hp_val)` floor
+### 7. ✅ FIXED `_calc_hp_max` — Toughness-style `@actor.level` formula bonus silently dropped, previously masked by the `max(base, hp_val)` floor
 **Agent 2 | Lines: ~1556–1571**
 
 This is a known, documented limitation (formula-string rule values are explicitly out of scope), but Agent 2 flagged a real consequence: for the one Toughness-holding character in the fixture (Bernard Inksworth, level 1), the missing `+level` HP bonus is currently invisible only because `max(base, hp_val)` happens to fall back to his current HP, which equals his true max right now. Once he takes damage, or at higher levels (where the missing bonus scales with level), displayed `hp_max` will visibly undercount by exactly his level.
