@@ -227,16 +227,84 @@ _UUID_BARE_RE = re.compile(r'@UUID\[[^\]]*\]')
 # Non-greedy with re.DOTALL handles nested brackets like [[/r 2d8[healing] #label]]
 _INLINE_ROLL_RE = re.compile(r'\[\[/.*?\]\]', re.DOTALL)
 
+# Matches @Damage[...]/@Check[...]/@Template[...] enrichers, with an optional
+# trailing {Label}. The bracket body allows one level of nested [...] (e.g.
+# "(1d8+3)[slashing]", "(4[splash])[force]") since PF2e never nests deeper.
+_ENRICHER_TAG_RE = re.compile(
+    r'@(Damage|Check|Template)\[((?:[^\[\]]|\[[^\[\]]*\])*)\](?:\{([^}]*)\})?'
+)
+
+
+def _format_damage_tag(content: str) -> str:
+    """'(1d8+3)[slashing]|options:area-damage' → '1d8+3 slashing damage'."""
+    m = re.match(r'^(.*)\[([^\[\]]+)\](?:\|.*)?$', content)
+    if not m:
+        return content.strip()
+    formula = m.group(1).strip()
+    if formula.startswith('(') and formula.endswith(')'):
+        formula = formula[1:-1]
+    types = [t.strip() for t in m.group(2).split(',') if t.strip()]
+    if "healing" in types:
+        other = [t for t in types if t != "healing"]
+        suffix = (" ".join(other) + " " if other else "") + "healing"
+    else:
+        suffix = (" ".join(types) + " damage") if types else "damage"
+    return f"{formula} {suffix}".strip()
+
+
+def _format_check_tag(content: str) -> str:
+    """'fortitude|dc:20|basic' → 'basic DC 20 Fortitude'."""
+    parts = [p.strip() for p in content.split('|')]
+    slug  = parts[0] if parts else ""
+    dc, basic = None, False
+    for p in parts[1:]:
+        if p.startswith('dc:'):
+            dc = p[3:]
+        elif p == 'basic':
+            basic = True
+    name   = "flat check" if slug == "flat" else slug.capitalize()
+    prefix = "basic " if basic else ""
+    if dc:
+        return f"{prefix}DC {dc} {name}"
+    return name if slug == "flat" else f"{name} check"
+
+
+def _format_template_tag(content: str) -> str:
+    """'burst|distance:40' → '40-foot burst'."""
+    parts    = [p.strip() for p in content.split('|')]
+    shape    = parts[0] if parts else ""
+    distance = next((p[len('distance:'):] for p in parts[1:]
+                      if p.startswith('distance:')), None)
+    return f"{distance}-foot {shape}" if distance else shape
+
+
+def _resolve_enricher_tag(m: re.Match) -> str:
+    tag, content, label = m.group(1), m.group(2), m.group(3)
+    if label:
+        return label
+    if tag == "Damage":
+        return _format_damage_tag(content)
+    if tag == "Check":
+        return _format_check_tag(content)
+    if tag == "Template":
+        return _format_template_tag(content)
+    return content
+
 
 def clean_foundry_text(text: str) -> str:
     """
     Remove Foundry-specific markup:
-      @UUID[...]{Label}  → Label
-      @UUID[...]         → (removed)
-      [[/r 2d8 ...]]     → (removed)
+      @UUID[...]{Label}    → Label
+      @UUID[...]           → (removed)
+      @Damage[...]{Label}  → Label
+      @Damage[2d6[fire]]   → '2d6 fire damage'
+      @Check[fortitude|dc:20]  → 'DC 20 Fortitude'
+      @Template[burst|distance:40]  → '40-foot burst'
+      [[/r 2d8 ...]]       → (removed)
     """
     text = _UUID_RE.sub(r'\1', text)
     text = _UUID_BARE_RE.sub('', text)
+    text = _ENRICHER_TAG_RE.sub(_resolve_enricher_tag, text)
     text = _INLINE_ROLL_RE.sub('', text)
     return text
 
