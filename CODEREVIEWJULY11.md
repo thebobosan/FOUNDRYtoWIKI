@@ -48,7 +48,7 @@ The `target`-matching branch that attributes an NPC kill to the most recent hit 
 
 ## Medium — Confirmed by Multiple Agents (Currently Dormant)
 
-### 5. `_calc_save` / `_calc_perception` — stale precomputed `value` not invalidated when rules-derived rank is higher
+### 5. ✅ FIXED `_calc_save` / `_calc_perception` — stale precomputed `value` not invalidated when rules-derived rank is higher
 **Confirmed by: Agents 1 & 3 | Lines: ~1489–1520**
 
 Both functions correctly merge `rules_ranks` (handles level-gated proficiency upgrades, e.g. "Expert Fortitude at level 3") into `rank`, but then return the actor's stored `value` unconditionally if present — without checking whether that stored total still corresponds to the *pre-upgrade* rank. This is the same bug class already fixed for skills (`_parse_character` ~1830–1838 explicitly discards a stale skill `value` when the rules-rank exceeds the stored rank); saves and perception were missed by that fix. Currently dormant: both agents confirmed `system.saves.*.value` / `system.perception.value` are absent for every PC in the fixture, so the stale-value path isn't exercised by current data — but it will silently misfire the moment Foundry does persist one of those fields alongside a rules-based upgrade.
