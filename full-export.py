@@ -3956,8 +3956,8 @@ class SessionExporter:
                 if item.get("type") not in PHYSICAL:
                     continue
                 iid  = item.get("_id", "")
-                sys  = item.get("system") or {}
-                qty  = _int(sys.get("quantity", 1) if isinstance(sys, dict) else 1)
+                isys = item.get("system") or {}
+                qty  = _int(isys.get("quantity", 1) if isinstance(isys, dict) else 1)
                 items[iid] = {
                     "name": item.get("name", ""),
                     "type": item.get("type", ""),
@@ -4014,8 +4014,8 @@ class SessionExporter:
                 if item.get("type") not in PHYSICAL:
                     continue
                 iid  = item.get("_id", "")
-                sys  = item.get("system") or {}
-                qty  = _int(sys.get("quantity", 1) if isinstance(sys, dict) else 1)
+                isys = item.get("system") or {}
+                qty  = _int(isys.get("quantity", 1) if isinstance(isys, dict) else 1)
                 name = item.get("name", "Unknown")
                 img  = icon_url(item.get("img", ""), item.get("type", ""))
                 curr_ids.add(iid)
