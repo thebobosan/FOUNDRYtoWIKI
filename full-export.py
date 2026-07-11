@@ -3240,11 +3240,13 @@ class SessionExporter:
             if char["name"] not in present:
                 continue
             level, xp = char.get("level"), char.get("xp")
-            if level is None or xp is None:
+            if level is None or xp is None or not str(xp).strip():
                 continue
 
             prev_entry = prev_chars.get(char["id"])
-            if not prev_entry or prev_entry.get("level") is None or prev_entry.get("xp") is None:
+            if (not prev_entry or prev_entry.get("level") is None
+                    or prev_entry.get("xp") is None
+                    or not str(prev_entry.get("xp")).strip()):
                 continue
 
             start_level, start_xp = _int(prev_entry["level"]), _int(prev_entry["xp"])
