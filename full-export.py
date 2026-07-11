@@ -3641,6 +3641,13 @@ class SessionExporter:
         agree on the same boundaries, or e.g. the "Encounters: N" count at
         the top of a session page could disagree with the number of
         per-encounter breakdowns below it.
+
+        Each window also carries "end_ts" = its last initiative roll's ts +
+        ENCOUNTER_GAP_MS, since a new encounter always starts with a fresh
+        initiative roll (there's no other way to open one in PF2e). Without
+        this bound, any later message (post-combat healing-drag damage, a
+        hazard hit hours later, GM HP fiddling) gets bucketed into the most
+        recently started encounter no matter how much later it happened.
         """
         sorted_rolls = sorted(rolls, key=lambda r: r.get("ts", 0))
         cluster_ids  = self._cluster_by_gap(sorted_rolls)
@@ -3649,6 +3656,7 @@ class SessionExporter:
             if cid == len(windows):
                 windows.append({"start_ts": roll.get("ts", 0), "rolls": []})
             windows[cid]["rolls"].append(roll)
+            windows[cid]["end_ts"] = roll.get("ts", 0) + self.ENCOUNTER_GAP_MS
         return windows
 
     def _compute_combat_stats(self, rolls: list[dict], start: datetime, end: datetime,
@@ -3684,7 +3692,11 @@ class SessionExporter:
 
         def _window_for_ts(ts: float):
             idx = bisect.bisect_right(window_starts, ts) - 1
-            return idx if idx >= 0 else None
+            if idx < 0:
+                return None
+            if float(ts) > windows[idx]["end_ts"]:
+                return None
+            return idx
 
         max_round: list[int] = [0] * len(windows)
         pc_stats: dict[str, dict] = {}
