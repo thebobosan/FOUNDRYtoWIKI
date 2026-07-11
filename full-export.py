@@ -2274,7 +2274,7 @@ class FullExporter:
             raw = skills_raw.get(key)
             stored_data = dict(raw) if isinstance(raw, dict) else {}
             rules_rank  = rules_ranks.get(f"skills.{key}", 0)
-            if rules_rank > _int(stored_data.get("rank", 0)):
+            if rules_rank > self._rank_from_node(stored_data):
                 stored_data["rank"] = rules_rank
                 # Discard any stale precomputed total so _calc_skill recomputes
                 # from the corrected rank instead of returning the old value.
