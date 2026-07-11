@@ -104,7 +104,7 @@ Two separate fights on the same map/scene within one session window collapse int
 
 ---
 
-### 11. `_compute_xp` — empty-string `xp` not treated as "missing"
+### 11. ✅ FIXED `_compute_xp` — empty-string `xp` not treated as "missing"
 **Agent 3 | Lines: ~3148–3196**
 
 `_get_detail_field` returns `""` (not `None`) when `details.xp.value` is absent. The skip guard (`if level is None or xp is None: continue`) doesn't catch `xp == ""`, so a character with a blank XP field (common right after a level-up in some Foundry configurations) falls through to `_int()`, silently defaulting to `0` and potentially producing a bogus "XP gained" entry on the session page.
