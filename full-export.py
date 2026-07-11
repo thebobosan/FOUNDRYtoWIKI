@@ -1659,8 +1659,11 @@ class FullExporter:
         perc_total, perc_rank    = self._calc_perception(system, level, abilities["wis"], items, rules_ranks)
 
         speed_node  = attrs.get("speed") or {}
-        speed_val   = _int(speed_node.get("value") or speed_node.get("total", 25)
-                           if isinstance(speed_node, dict) else (speed_node or 25))
+        if isinstance(speed_node, dict):
+            v = speed_node.get("value")
+            speed_val = _int(v if v is not None else speed_node.get("total", 25))
+        else:
+            speed_val = _int(speed_node) if speed_node is not None else 25
         other_speeds = [{"type": sp["type"].title(), "value": _int(sp["value"])}
                         for sp in (speed_node.get("otherSpeeds", [])
                                    if isinstance(speed_node, dict) else [])
@@ -2407,8 +2410,11 @@ class FullExporter:
         perc_mod  = perc_node.get("mod", perc_val) if isinstance(perc_node, dict) else perc_val
 
         speed_node  = attrs.get("speed") or {}
-        speed_val   = _int(speed_node.get("value") or speed_node.get("total", 25)
-                           if isinstance(speed_node, dict) else (speed_node or 25))
+        if isinstance(speed_node, dict):
+            v = speed_node.get("value")
+            speed_val = _int(v if v is not None else speed_node.get("total", 25))
+        else:
+            speed_val = _int(speed_node) if speed_node is not None else 25
         other_speeds = [{"type": sp["type"].title(), "value": _int(sp["value"])}
                         for sp in (speed_node.get("otherSpeeds", [])
                                    if isinstance(speed_node, dict) else [])
