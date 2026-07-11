@@ -4139,7 +4139,7 @@ class SessionExporter:
                 icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
                 lines += [
                     "|-",
-                    f"| {icon_s} || [[{wiki_escape(entry['name'])}]] || {entry['qty']} "
+                    f"| {icon_s} || {wiki_escape(entry['name'])} || {entry['qty']} "
                     f"|| {_char_cell(entry)}",
                 ]
             lines.append("|}")
