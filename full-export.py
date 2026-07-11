@@ -600,6 +600,7 @@ class FullExporter:
         # and resolving token→actor names. Cached after first build.
         self._combat_record = None
         self._raw_msgs_cache = None
+        self._campaign_stats_cache = None
 
     # ── Wiki page name tracking (renames) ───────────────────────────────────
 
@@ -739,10 +740,11 @@ class FullExporter:
             if isinstance(ctx, dict) and not ctx.get("isHealing"):
                 target = ctx.get("target") or pf.get("target") or {}
                 if isinstance(target, dict):
-                    victim_id = target.get("actor", "")
-                    origin    = pf.get("origin") or {}
-                    atk_id    = (self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
-                                 or self._uuid_to_actor_id((m.get("speaker") or {}).get("actor", "")))
+                    raw_target = target.get("actor", "")
+                    victim_id  = self._uuid_to_actor_id(raw_target) or raw_target
+                    origin     = pf.get("origin") or {}
+                    atk_id     = (self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+                                  or (m.get("speaker") or {}).get("actor", ""))
                     if victim_id and atk_id and atk_id != victim_id:
                         hit_history.setdefault(victim_id, []).append(
                             (ts, atk_id, name_by_actor.get(atk_id, ""), msg_id)
@@ -1031,6 +1033,121 @@ class FullExporter:
         print(f"  Combat record: {len(events)} NPC kill(s) found "
               f"(from {len(dead_npc_tokens)} dead NPC token(s)).")
         return sorted(events, key=lambda e: e["ts"])
+
+    # ── Campaign-wide cumulative stats ──────────────────────────────────────
+
+    # A single downing produces multiple raw signals: the condition card AND
+    # every subsequent roll made while still Dying/Unconscious (recovery
+    # checks, received-healing rolls) all carry the condition in
+    # context.options. Signals for the same victim within this gap are
+    # collapsed into one "episode" so 'times downed' counts downings, not
+    # dying-state messages.
+    DOWNING_EPISODE_GAP_MS = 10 * 60 * 1000
+
+    def campaign_stats(self) -> dict:
+        """
+        Cumulative per-PC combat statistics across the entire message log
+        (no session window). Returns:
+
+            {
+              "per_pc": { actor_id: {
+                  "name", "kills", "downed", "dealt", "taken", "healed",
+                  "nemesis":  most frequent downer name or "",
+                  "fav_prey": most frequently slain victim name or "",
+              }, ... },                      # only PCs with any activity
+              "kill_log":    [kill events, chronological],   # PC attackers only
+              "downing_log": [downing episodes, chronological],  # PC victims only
+            }
+
+        Sources: _build_npc_kill_events (kills), _build_downing_events
+        collapsed into episodes (times downed), and appliedDamage chat flags
+        (damage dealt/taken and healing given). Healing given only counts
+        button-applied healing with an origin actor, so it can undercount;
+        damage numbers share the known appliedDamage limitation that
+        manual HP-bar edits leave no message to sum.
+        """
+        if getattr(self, "_campaign_stats_cache", None) is not None:
+            return self._campaign_stats_cache
+
+        name_by_actor, type_by_actor = self._actor_maps()
+        pc_ids = {aid for aid, t in type_by_actor.items() if t == "character"}
+
+        kill_log = [ev for ev in self._build_npc_kill_events()
+                    if ev["attacker_id"] in pc_ids]
+
+        # Collapse raw downing signals into per-victim episodes.
+        events_by_victim: dict[str, list] = {}
+        for ev in self._build_downing_events():
+            if ev["victim_id"] in pc_ids:
+                events_by_victim.setdefault(ev["victim_id"], []).append(ev)
+        downing_log = []
+        for evs in events_by_victim.values():
+            evs.sort(key=lambda e: e["ts"])
+            prev_ts = None
+            for ev in evs:
+                if prev_ts is None or ev["ts"] - prev_ts > self.DOWNING_EPISODE_GAP_MS:
+                    downing_log.append(ev)
+                prev_ts = ev["ts"]
+        downing_log.sort(key=lambda e: e["ts"])
+
+        dealt: dict[str, int] = {}
+        taken: dict[str, int] = {}
+        healed: dict[str, int] = {}
+        for m in self._load_raw_messages():
+            pf      = (m.get("flags") or {}).get("pf2e") or {}
+            applied = pf.get("appliedDamage")
+            if not isinstance(applied, dict):
+                continue
+            amount = sum(abs(_int(u.get("value", 0))) for u in (applied.get("updates") or [])
+                         if u.get("path") == "system.attributes.hp.value")
+            if amount <= 0:
+                continue
+            victim_id = (self._uuid_to_actor_id(applied.get("uuid", ""))
+                         or (m.get("speaker") or {}).get("actor", ""))
+            origin = pf.get("origin") or {}
+            atk_id = self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+            if applied.get("isHealing"):
+                # Self-healing excluded: "Healing Given" measures support play.
+                if atk_id in pc_ids and atk_id != victim_id:
+                    healed[atk_id] = healed.get(atk_id, 0) + amount
+            else:
+                if victim_id in pc_ids:
+                    taken[victim_id] = taken.get(victim_id, 0) + amount
+                if atk_id in pc_ids and atk_id != victim_id:
+                    dealt[atk_id] = dealt.get(atk_id, 0) + amount
+
+        def _most_common(names: list) -> str:
+            counts: dict[str, int] = {}
+            for n in names:
+                if n:
+                    counts[n] = counts.get(n, 0) + 1
+            return max(counts, key=lambda n: (counts[n], n)) if counts else ""
+
+        per_pc = {}
+        for aid in pc_ids:
+            my_kills = [e for e in kill_log    if e["attacker_id"] == aid]
+            my_downs = [e for e in downing_log if e["victim_id"]   == aid]
+            rec = {
+                "name":     name_by_actor.get(aid, "Unknown"),
+                "kills":    len(my_kills),
+                "downed":   len(my_downs),
+                "dealt":    dealt.get(aid, 0),
+                "taken":    taken.get(aid, 0),
+                "healed":   healed.get(aid, 0),
+                "nemesis":  _most_common([e["attacker_name"] for e in my_downs]),
+                "fav_prey": _most_common([e["victim_name"]   for e in my_kills]),
+            }
+            # Leave out PCs with zero campaign activity (test actors, retired
+            # sheets) — an all-zero leaderboard row is noise, not data.
+            if any(rec[k] for k in ("kills", "downed", "dealt", "taken", "healed")):
+                per_pc[aid] = rec
+
+        self._campaign_stats_cache = {
+            "per_pc":      per_pc,
+            "kill_log":    kill_log,
+            "downing_log": downing_log,
+        }
+        return self._campaign_stats_cache
 
     # ── LevelDB helpers ───────────────────────────────────────────────────
 
@@ -2954,6 +3071,89 @@ class FullExporter:
         ]
         return "\n".join(lines)
 
+    def render_campaign_stats_page(self) -> str:
+        """
+        Render the cumulative 'Campaign Stats' page: a per-PC leaderboard
+        (kills, times downed, damage dealt/taken, healing given, nemesis,
+        favorite prey) plus collapsible chronological kill and downing logs.
+
+        Same player-facing constraints as the rest of the wiki: only PC
+        stats and already-witnessed NPC token names appear — no NPC stat
+        blocks or GM-only information.
+        """
+        stats = self.campaign_stats()
+
+        def _date(ts) -> str:
+            return (datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+                    if ts else "—")
+
+        def _pc_link(name: str) -> str:
+            name_esc = wiki_escape(name)
+            return f"[[Characters/{name_esc}|{name_esc}]]"
+
+        lines = [
+            "= Campaign Stats =",
+            "",
+            "''Cumulative combat statistics reconstructed from the campaign's "
+            "chat log. Damage totals only include damage applied through the "
+            "chat log, so they undercount fights where HP was adjusted by hand.''",
+            "",
+            "== Leaderboard ==",
+        ]
+
+        per_pc = stats["per_pc"]
+        if per_pc:
+            lines.append('{| class="wikitable sortable" style="width:100%;"')
+            lines.append("! Character !! Kills !! Times Downed !! Damage Dealt "
+                         "!! Damage Taken !! Healing Given !! Nemesis !! Favorite Prey")
+            # Kills desc, then downings asc (fewer is better), then name.
+            ranked = sorted(per_pc.values(),
+                            key=lambda r: (-r["kills"], r["downed"], r["name"]))
+            for r in ranked:
+                nemesis  = wiki_escape(r["nemesis"])  if r["nemesis"]  else "—"
+                fav_prey = wiki_escape(r["fav_prey"]) if r["fav_prey"] else "—"
+                lines += [
+                    "|-",
+                    f"| {_pc_link(r['name'])} || {r['kills']} || {r['downed']} "
+                    f"|| {r['dealt']} || {r['taken']} || {r['healed']} "
+                    f"|| {nemesis} || {fav_prey}",
+                ]
+            lines.append("|}")
+        else:
+            lines.append("* ''No combat activity recorded yet.''")
+        lines.append("")
+
+        kill_log = stats["kill_log"]
+        if kill_log:
+            rows = ['{| class="wikitable sortable" style="width:100%;"',
+                    "! Date !! Character !! Slew"]
+            for ev in reversed(kill_log):   # newest first
+                rows += ["|-",
+                         f"| {_date(ev['ts'])} || {_pc_link(ev['attacker_name'])} "
+                         f"|| {wiki_escape(ev['victim_name'])}"]
+            rows.append("|}")
+            lines.append(collapsible(f"⚔ Kill Log ({len(kill_log)})", "\n".join(rows)))
+
+        downing_log = stats["downing_log"]
+        if downing_log:
+            rows = ['{| class="wikitable sortable" style="width:100%;"',
+                    "! Date !! Character !! Downed By"]
+            for ev in reversed(downing_log):   # newest first
+                downer = (wiki_escape(ev["attacker_name"])
+                          if ev["attacker_name"] else "—")
+                rows += ["|-",
+                         f"| {_date(ev['ts'])} || {_pc_link(ev['victim_name'])} "
+                         f"|| {downer}"]
+            rows.append("|}")
+            lines.append(collapsible(f"💀 Downing Log ({len(downing_log)})", "\n".join(rows)))
+
+        lines += [
+            "",
+            f"''Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Campaign]]",
+        ]
+        return "\n".join(lines)
+
     # ── Push / preview ────────────────────────────────────────────────────
 
     _SYNC_LINE_RE = re.compile(r"^''Last synced:.*?''\n?", re.MULTILINE)
@@ -3049,6 +3249,19 @@ class FullExporter:
         page.edit(new_markup, summary="Auto-sync: PF2e party stash exporter.")
         print(f"✓  {'Created' if not current_markup else 'Updated'}: Party Stash")
 
+    def push_campaign_stats(self, site):
+        """Push the cumulative campaign stats page. Accepts a shared mwclient.Site."""
+        new_markup     = self.render_campaign_stats_page()
+        page           = site.pages["Campaign Stats"]
+        current_markup = page.text()
+
+        if current_markup and self._comparable(current_markup) == self._comparable(new_markup):
+            print("  –  Skipped (no changes): Campaign Stats")
+            return
+
+        page.edit(new_markup, summary="Auto-sync: PF2e campaign stats exporter.")
+        print(f"✓  {'Created' if not current_markup else 'Updated'}: Campaign Stats")
+
     def preview(self, target_name: str | None = None, npcs: bool = False):
         actors = self.get_all_npcs() if npcs else self.get_all_characters()
         if target_name:
@@ -3074,6 +3287,13 @@ class FullExporter:
         out_dir.mkdir(exist_ok=True)
         filename = out_dir / "Party_Stash.wiki"
         filename.write_text(self.render_party_stash_page(parties), encoding="utf-8")
+        print(f"✓  Preview written: {filename}")
+
+    def preview_campaign_stats(self):
+        out_dir = Path("wiki_preview")
+        out_dir.mkdir(exist_ok=True)
+        filename = out_dir / "Campaign_Stats.wiki"
+        filename.write_text(self.render_campaign_stats_page(), encoding="utf-8")
         print(f"✓  Preview written: {filename}")
 
     def close(self):
@@ -3908,6 +4128,7 @@ Examples:
   Push NPCs + session:            python full-exporter.py --npcs --push --session
   Push PCs + session:             python full-exporter.py --push --session
   Push PCs + NPCs + session:      python full-exporter.py --push --npcs --session
+  Push campaign stats page:       python full-exporter.py --push --stats
   Debug raw data:                 python full-exporter.py --char "Name" --debug
 """)
     parser.add_argument("--push",          action="store_true",
@@ -3918,6 +4139,8 @@ Examples:
                         help="Include NPC export in this run")
     parser.add_argument("--party",         action="store_true",
                         help="Include the party stash export in this run")
+    parser.add_argument("--stats",         action="store_true",
+                        help="Include the cumulative campaign stats page in this run")
     parser.add_argument("--session",       action="store_true",
                         help="Build and push today's session log (4am window)")
     parser.add_argument("--session-date",  metavar="YYYY-MM-DD",
@@ -3961,6 +4184,11 @@ Examples:
                 print("\n── Party Stash ─────────────────────────────────────")
                 exporter.push_party_stash(site)
 
+            # Optionally push the cumulative campaign stats page
+            if args.stats:
+                print("\n── Campaign Stats ──────────────────────────────────")
+                exporter.push_campaign_stats(site)
+
             # Optionally push session log
             if args.session:
                 session_start = None
@@ -3981,6 +4209,8 @@ Examples:
             exporter.preview(target_name=args.char, npcs=args.npcs)
             if args.party:
                 exporter.preview_party_stash()
+            if args.stats:
+                exporter.preview_campaign_stats()
 
     finally:
         exporter.close()
