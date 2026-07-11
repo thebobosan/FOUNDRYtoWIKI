@@ -3321,6 +3321,24 @@ class FullExporter:
         """Strip the timestamp line so content diffs ignore it."""
         return FullExporter._SYNC_LINE_RE.sub("", markup).strip()
 
+    # MediaWiki title-invalid characters (a subset also block page creation
+    # outright: '#' truncates to a section link, '<' '>' are rejected, and
+    # '[' ']' '|' '{' '}' collide with wikitext syntax if left in a title).
+    _INVALID_TITLE_CHARS_RE = re.compile(r'[#<>\[\]|{}]')
+
+    @staticmethod
+    def _sanitize_page_title(name: str) -> str:
+        """
+        Make a Foundry actor name safe as a MediaWiki page title segment.
+        Actor names are freely player-editable, so this has to handle:
+          '/' — otherwise silently creates a nested subpage
+          '#','<','>','[',']','|','{','}' — invalid in MediaWiki titles;
+              left in, page.edit fails on every sync for that actor.
+        """
+        name = (name or "Unnamed").replace("/", "-")
+        name = FullExporter._INVALID_TITLE_CHARS_RE.sub("", name)
+        return name.strip() or "Unnamed"
+
     def push_to_wiki(self, site, target_name: str | None = None, npcs: bool = False):
         """Push characters or NPCs. Accepts a shared mwclient.Site instance."""
         actors = self.get_all_npcs() if npcs else self.get_all_characters()
@@ -3338,7 +3356,7 @@ class FullExporter:
         section    = page_names.setdefault(prefix, {})
 
         for actor in actors:
-            name     = actor["name"]
+            name     = self._sanitize_page_title(actor["name"])
             actor_id = actor.get("id")
             try:
                 # If this actor id was last pushed under a different name,
