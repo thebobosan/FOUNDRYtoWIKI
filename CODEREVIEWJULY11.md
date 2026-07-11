@@ -122,7 +122,7 @@ An item whose `containerId` points to itself, or two containers whose `container
 
 ---
 
-### 13. `enrich_item` — enriched `traits` list is a shared mutable reference into the compendium cache
+### 13. ✅ FIXED `enrich_item` — enriched `traits` list is a shared mutable reference into the compendium cache
 **Agent 3 | Lines: ~405–410**
 
 `traits_node["value"] = comp["traits"]` assigns the compendium cache's list object directly rather than copying it, so every item across every character mapping to the same compendium entry shares one mutable list object (persisted across runs via `session_snapshots/compendium_cache.json`). No current code path mutates it in place, so this is currently inert — flagged as a foot-gun for future code.
