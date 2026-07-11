@@ -37,7 +37,7 @@ All three agents verified this empirically against the `temporary-title` fixture
 
 ---
 
-### 4. `_build_npc_kill_events` — attacker attribution contaminated by non-damage rolls (possible healing/buff credit for a kill)
+### 4. ✅ FIXED `_build_npc_kill_events` — attacker attribution contaminated by non-damage rolls (possible healing/buff credit for a kill)
 **Agent 2 | Lines: ~826–848**
 
 The `target`-matching branch that attributes an NPC kill to the most recent hit against that token has no `isHealing`/roll-type filter — unlike the sibling `applied`-based branch, which does check `not applied.get("isHealing")`. Verified empirically: 116 non-attack roll messages (saving-throw and skill-check rolls) in the fixture carry `context.target` and pass this branch as if they were "hits." Any such roll with a later timestamp than the actual killing blow silently overrides attribution, crediting the kill to whoever cast a nearby buff/debuff/forced-save spell instead of whoever landed the finishing blow.
