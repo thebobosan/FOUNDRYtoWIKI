@@ -2629,7 +2629,7 @@ class FullExporter:
             item_gp += unit_gp * qty / per
 
         total_gp  = coin_gp + item_gp
-        total_str = f"{total_gp:g} gp"
+        total_str = f"{total_gp:,.2f}".rstrip('0').rstrip('.') + " gp"
         bulk_cur = char.get("bulk_current", 0)
         bulk_enc = char.get("bulk_enc", 0)
         bulk_max = char.get("bulk_max", 0)
