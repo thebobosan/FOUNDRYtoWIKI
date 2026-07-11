@@ -1494,7 +1494,8 @@ class FullExporter:
 
             # ── Source A: ActiveEffectLike rules ──────────────────────────
             if itype in RULE_TYPES:
-                for rule in (isys.get("rules") or []):
+                item_rules = isys.get("rules") or []
+                for rule in item_rules:
                     if not isinstance(rule, dict):
                         continue
                     if rule.get("key") != "ActiveEffectLike":
@@ -1502,10 +1503,10 @@ class FullExporter:
                     mode = rule.get("mode", "")
                     if mode not in ("override", "upgrade"):
                         continue
-                    path = rule.get("path", "")
+                    path = self._resolve_rule_path(rule.get("path", ""), item, item_rules)
                     if path not in PATH_MAP:
                         continue
-                    value = _int(rule.get("value", 0))
+                    value = self._eval_rule_value(rule.get("value", 0), level)
                     if value <= 0:
                         continue
                     if not self._rule_applies(rule, level):
@@ -1530,6 +1531,53 @@ class FullExporter:
                         ranks[f"skills.{s}"] = max(ranks.get(f"skills.{s}", 0), 1)
 
         return ranks
+
+    _CHOICESET_TEMPLATE_RE = re.compile(r"\{item\|flags\.pf2e\.rulesSelections\.(\w+)\}")
+
+    @classmethod
+    def _resolve_rule_path(cls, path: str, item: dict, item_rules: list) -> str:
+        """
+        Resolve a templated ActiveEffectLike path like
+        'system.skills.{item|flags.pf2e.rulesSelections.skill}.rank' against a
+        player's choice. Foundry normally records the choice at
+        flags.pf2e.rulesSelections.<key>; when that's absent (observed on at
+        least one real character), fall back to the sibling ChoiceSet rule's
+        own 'selection' field, matched by its 'flag' key.
+        """
+        m = cls._CHOICESET_TEMPLATE_RE.search(path)
+        if not m:
+            return path
+        flag_key = m.group(1)
+        selections = (((item.get("flags") or {}).get("pf2e") or {}).get("rulesSelections") or {})
+        choice = selections.get(flag_key)
+        if choice is None:
+            for rule in item_rules:
+                if (isinstance(rule, dict) and rule.get("key") == "ChoiceSet"
+                        and rule.get("flag") == flag_key):
+                    choice = rule.get("selection")
+                    break
+        if not isinstance(choice, str) or not choice:
+            return path
+        return cls._CHOICESET_TEMPLATE_RE.sub(choice, path)
+
+    _TERNARY_GTE_RE = re.compile(
+        r"^ternary\(gte\(@actor\.level,\s*(\d+)\),\s*(\d+),\s*(\d+)\)$"
+    )
+
+    @classmethod
+    def _eval_rule_value(cls, value, level: int) -> int:
+        """
+        Evaluate an ActiveEffectLike rule value, which is usually a plain int
+        but can be a Foundry roll-data expression string, e.g.
+        'ternary(gte(@actor.level,5),2,1)' (Skilled Human: Trained until
+        level 5, Expert after). Unrecognized expressions fall back to 0.
+        """
+        if isinstance(value, str):
+            m = cls._TERNARY_GTE_RE.match(value.strip())
+            if m:
+                threshold, if_true, if_false = (int(m.group(i)) for i in (1, 2, 3))
+                return if_true if level >= threshold else if_false
+        return _int(value, 0)
 
     @staticmethod
     def _rule_applies(rule: dict, level: int) -> bool:
