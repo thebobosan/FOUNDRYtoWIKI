@@ -95,7 +95,7 @@ Names flow straight into wikitable rows and `[[links]]` (e.g. `f"| {wiki_img(...
 
 ---
 
-### 10. `_extract_session_data` — `num_combats` counts distinct scenes, not distinct encounters
+### 10. ✅ FIXED `_extract_session_data` — `num_combats` counts distinct scenes, not distinct encounters
 **Agent 3 | Lines: ~3018–3019**
 
 Two separate fights on the same map/scene within one session window collapse into `num_combats = 1`, since `data/combats` is documented as unreliable/empty and scene identity is used as a stand-in for encounter boundaries.
