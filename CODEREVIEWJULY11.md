@@ -131,7 +131,7 @@ An item whose `containerId` points to itself, or two containers whose `container
 
 ---
 
-### 14. `_build_downing_events` hit-history dedup key can drop a simultaneous second hit from the same attacker
+### 14. ✅ FIXED `_build_downing_events` hit-history dedup key can drop a simultaneous second hit from the same attacker
 **Agent 2 | Lines: ~600–607**
 
 Dedup key `(ts, atk_id)` collapses two-weapon/flurry attacks or multiple damage instances from the same attacker at an identical millisecond timestamp into one `hit_history` entry. Low practical impact — the attacker credited is the same either way, this only affects which exact timestamp is used for "most recent hit before downing" attribution.
