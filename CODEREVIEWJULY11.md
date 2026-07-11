@@ -86,7 +86,7 @@ Names flow straight into wikitable rows and `[[links]]` (e.g. `f"| {wiki_img(...
 
 ## Low — Single Agent / Minor / Edge Cases
 
-### 9. `speed_val` silently defaults to 25 for a genuine 0 speed
+### 9. ✅ FIXED `speed_val` silently defaults to 25 for a genuine 0 speed
 **Agent 3 | Lines: ~1621, ~2369 (`_parse_character` and `_parse_npc`)**
 
 `speed_node.get("value") or speed_node.get("total", 25)` discards a legitimately-stored `0` (immobile creature, or a stat currently reduced to 0 by a condition) because `0` is falsy, falling through to `total`/the `25` default instead.
