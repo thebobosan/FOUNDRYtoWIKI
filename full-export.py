@@ -1495,7 +1495,11 @@ class FullExporter:
 
         saves = system.get("saves") or {}
         node  = saves.get(slug) or {}
-        if isinstance(node, dict) and node.get("value") is not None:
+        # If the rules-derived rank exceeds what the stored node itself implies
+        # (e.g. a level-gated "Expert Fortitude at level 3" upgrade), the
+        # stored 'value' predates that upgrade — discard it and recompute.
+        if (isinstance(node, dict) and node.get("value") is not None
+                and rank <= self._rank_from_node(node)):
             return _int(node["value"]), rank
 
         prof_bonus = (level + rank * 2) if rank > 0 else 0
@@ -1511,11 +1515,15 @@ class FullExporter:
                           items: list = None, rules_ranks: dict = None) -> tuple[int, int]:
         rank = self._perception_rank(system, items, rules_ranks)
 
+        # If the rules-derived rank exceeds what the stored node itself implies,
+        # the stored 'value' predates that upgrade — discard it and recompute.
         perc = system.get("perception") or {}
-        if isinstance(perc, dict) and perc.get("value") is not None:
+        if (isinstance(perc, dict) and perc.get("value") is not None
+                and rank <= self._rank_from_node(perc)):
             return _int(perc["value"]), rank
         perc2 = (system.get("attributes") or {}).get("perception") or {}
-        if isinstance(perc2, dict) and perc2.get("value") is not None:
+        if (isinstance(perc2, dict) and perc2.get("value") is not None
+                and rank <= self._rank_from_node(perc2)):
             return _int(perc2["value"]), rank
 
         prof_bonus = (level + rank * 2) if rank > 0 else 0
