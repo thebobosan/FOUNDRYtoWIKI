@@ -1138,20 +1138,37 @@ class FullExporter:
             elif itype == "class":
                 ka = isys.get("keyAbility") or {}
                 if isinstance(ka, dict):
-                    ka_val = ka.get("value", [])
+                    ka_val      = ka.get("value", [])
+                    ka_selected = ka.get("selected")
                 elif isinstance(ka, str):
-                    ka_val = [ka]
+                    ka_val, ka_selected = [ka], None
                 else:
-                    ka_val = ka or []
+                    ka_val, ka_selected = (ka or []), None
                 if isinstance(ka_val, str):
-                    # Single-option class (e.g. Wizard/Oracle) — apply directly
-                    if ka_val == slug:
-                        score = score + 2 if score < 18 else score + 1
-                elif isinstance(ka_val, list):
-                    # Multi-option class — use the player's actual choice from the actor
-                    actor_key = (system.get("details") or {}).get("keyability", "")
-                    if actor_key and actor_key == slug:
-                        score = score + 2 if score < 18 else score + 1
+                    ka_val = [ka_val]
+
+                # Foundry writes a "selected" key-ability field on both the
+                # class item and system.details.keyability, but for a
+                # single-option class (no real UI choice was ever offered)
+                # it's left at an unreliable schema default rather than
+                # cleared or unset — observed as a uniform "str" across
+                # nearly every actor in the fixture regardless of class.
+                # Trust an explicit selection only when it's genuinely one
+                # of the class's real options; a single-option class's one
+                # option is always correct regardless of what "selected"
+                # (or the details.keyability default) says.
+                if len(ka_val) == 1:
+                    chosen = ka_val[0]
+                elif not ka_val:
+                    chosen = ka_selected
+                elif ka_selected in ka_val:
+                    chosen = ka_selected
+                else:
+                    detail_key = self._get_detail_field(system.get("details"), "keyability")
+                    chosen = detail_key if detail_key in ka_val else None
+
+                if chosen == slug:
+                    score = score + 2 if score < 18 else score + 1
 
             elif itype == "heritage":
                 b = isys.get("boost") or isys.get("boosts")
