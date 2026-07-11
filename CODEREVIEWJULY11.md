@@ -57,7 +57,7 @@ Both functions correctly merge `rules_ranks` (handles level-gated proficiency up
 
 ---
 
-### 6. `_calc_hp_max` — HP bonus rules applied without equip-state or predicate gating
+### 6. ✅ FIXED `_calc_hp_max` — HP bonus rules applied without equip-state or predicate gating
 **Confirmed by: Agents 1 & 3 | Lines: ~1556–1571**
 
 Unlike `_armor_alteration()` (checks `_is_equipped` + `_predicate_facts_true`) and `_rules_ranks()` (checks `_rule_applies` for level gates), the `FlatModifier`/`ItemAlteration` HP-bonus scan in `_calc_hp_max` sums any matching rule from *any* item regardless of whether it's currently equipped or its predicate/level-gate holds. Currently dormant — the only real example in the fixture (the Toughness feat) uses a formula-string value (`"@actor.level"`) that's already skipped by the literal-int check (see #7) — but any future item/feat with a literal-int HP bonus gated by equip-state or level would be unconditionally applied.
