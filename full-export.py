@@ -39,7 +39,7 @@ FOUNDRY_URL  = "https://foundry.atkennedy.com"
 
 WIKI_URL      = "wiki.atkennedy.com"
 WIKI_USER     = "Oracle"
-WIKI_PASSWORD = os.environ.get("WIKI_PASSWORD", "942u09g4u09g4u0g2u0guu0gu0gwu0gw4u0gw4u0gw4eu0awdgda")
+WIKI_PASSWORD = os.environ.get("WIKI_PASSWORD")
 
 COMPENDIUM_PACKS = [
     "equipment", "spells", "feats", "actions",
@@ -469,6 +469,11 @@ def collapsible(title: str, content: str, collapsed: bool = True) -> str:
 
 def make_site() -> mwclient.Site:
     """Create and return an authenticated MediaWiki site connection."""
+    if not WIKI_PASSWORD:
+        raise RuntimeError(
+            "WIKI_PASSWORD environment variable is not set — refusing to "
+            "connect without it. Preview/--no-push runs don't need it."
+        )
     site = mwclient.Site(WIKI_URL, path="/")
     site.login(WIKI_USER, WIKI_PASSWORD)
     return site

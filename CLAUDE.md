@@ -42,6 +42,9 @@ python full-export.py --char "Name" --push
 # Push PCs + NPCs + today's session log
 python full-export.py --push --npcs --session
 
+# Push the cumulative campaign stats leaderboard page (works in preview mode too)
+python full-export.py --push --stats
+
 # Dump raw Foundry JSON for debugging stat issues
 python full-export.py --char "Name" --debug
 
@@ -51,7 +54,7 @@ python full-export.py --no-compendium
 
 Dependencies: `plyvel`, `mwclient` (install via pip). Requires access to the Foundry LevelDB files on disk.
 
-Wiki password is read from the `WIKI_PASSWORD` environment variable (falls back to a hardcoded default in source).
+Wiki password is read from the `WIKI_PASSWORD` environment variable. `make_site()` raises loudly if it's unset — there is no hardcoded fallback. Preview/non-push runs don't need it.
 
 ## Architecture
 
@@ -107,6 +110,10 @@ Item price is stored in `system.price.value` (a dict of `pp/gp/sp/cp`) and `syst
 - **Token id vs actor id:** multiple simultaneous instances of the same monster type (e.g. 5 Cave Scorpion tokens in one fight) share a single base Actor id, so actor-id-keyed hit tracking merges their combat histories together and misattributes kills between them. `_build_npc_kill_events()` keys entirely on token id (via `_uuid_to_token_id`, extracting the `Token.xxx` segment from a UUID) to keep each instance's hits and death separate. `_build_downing_events()` still keys PCs by actor id, which is fine in practice since PCs are effectively one token each.
 
 - **`data/combats` is typically empty** — don't rely on it for round/turn numbers or a combatant "defeated" flag (checked: 0 combat documents in the reference world despite dozens of real fights having happened). Per-round data does exist, just not there: individual PF2e roll messages embed `encounter:round:N` / `encounter:turn:N` tags inside `context.options`, which is the only place round/turn numbers survive.
+
+### Campaign stats page
+
+`campaign_stats()` aggregates the same event sources campaign-wide (no session window) into a per-PC record: kill count (from `_build_npc_kill_events`), times downed, damage dealt/taken and healing given (from `appliedDamage` flags only — manual HP-bar edits leave no message to sum, so totals undercount), plus "nemesis" (most frequent downer) and "favorite prey" (most-slain victim). Raw downing *signals* are collapsed into downing *episodes* per victim using a 10-minute gap (`DOWNING_EPISODE_GAP_MS`): one downing generates multiple signals (the condition card plus every recovery-check/heal roll made while still Dying), so counting raw signals would badly inflate "times downed". PCs with zero activity (test sheets) are excluded from the leaderboard. `render_campaign_stats_page()` emits the "Campaign Stats" page (leaderboard + collapsible kill/downing logs); pushed/previewed via `--stats`. Player-facing like the rest of the wiki — only PC stats and already-witnessed NPC token names, no NPC stat blocks.
 
 ### Session exporter
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for full-export.py against the monday-alkenstar world data.
+Test script for full-export.py against the temporary-title world data.
 
 Runs the full parse + render pipeline (no wiki push, no compendium enrichment)
 and reports pass/fail for each character and NPC. Use --verbose to see the
@@ -17,7 +17,8 @@ import os
 import argparse
 import traceback
 
-# No WIKI_PASSWORD guard needed — the script falls back to its default
+# No WIKI_PASSWORD guard needed — make_site() (which requires it) is never
+# called since this script never pushes.
 
 # mwclient may not be installed in dev environments — stub it out since we
 # never call push functions in this test script.
@@ -26,7 +27,7 @@ if "mwclient" not in _sys.modules:
     _sys.modules["mwclient"] = unittest.mock.MagicMock()
 
 HERE     = os.path.dirname(os.path.abspath(__file__))
-WORLD    = os.path.join(HERE, "monday-alkenstar")
+WORLD    = os.path.join(HERE, "temporary-title")
 SNAP_DIR = os.path.join(HERE, "test_snapshots")
 
 # ── Import the module, overriding path constants ──────────────────────────────
@@ -230,6 +231,53 @@ def validate_wealth(char: dict, exporter, verbose: bool) -> int:
     return fails
 
 
+# ── Campaign stats check ──────────────────────────────────────────────────────
+
+def validate_campaign_stats(exporter, verbose: bool) -> int:
+    fails = 0
+    section("Campaign Stats")
+
+    try:
+        stats = exporter.campaign_stats()
+        if not check("per_pc dict present", isinstance(stats.get("per_pc"), dict)):
+            fails += 1
+        for key in ("kill_log", "downing_log"):
+            if not check(f"{key} is a chronological list",
+                         isinstance(stats.get(key), list)
+                         and all(a["ts"] <= b["ts"] for a, b in
+                                 zip(stats[key], stats[key][1:]))):
+                fails += 1
+        for aid, rec in stats["per_pc"].items():
+            ok = (all(k in rec for k in ("name", "kills", "downed",
+                                         "dealt", "taken", "healed"))
+                  and all(rec[k] >= 0 for k in ("kills", "downed",
+                                                "dealt", "taken", "healed")))
+            if not check(f"per_pc record sane: {rec.get('name', aid)}", ok):
+                fails += 1
+        if not check("per_pc kills sum matches kill_log",
+                     sum(r["kills"] for r in stats["per_pc"].values())
+                     == len(stats["kill_log"])):
+            fails += 1
+
+        markup = exporter.render_campaign_stats_page()
+        for token in ("= Campaign Stats =", "== Leaderboard ==",
+                      "[[Category:Campaign]]"):
+            if not check(f"markup contains {token!r}", token in markup):
+                fails += 1
+        if stats["per_pc"]:
+            if not check("markup contains leaderboard table header",
+                         "! Character !! Kills !! Times Downed" in markup):
+                fails += 1
+        if verbose:
+            print(f"    Markup:\n{markup}\n")
+    except Exception as e:
+        print(f"    [{FAIL}] campaign stats raised: {e}")
+        traceback.print_exc()
+        fails += 1
+
+    return fails
+
+
 # ── Dummy exporter (for calling instance methods without wiki connection) ─────
 
 def _dummy_exporter():
@@ -247,7 +295,7 @@ def _cached_exporter():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Test full-export.py against monday-alkenstar")
+    parser = argparse.ArgumentParser(description="Test full-export.py against temporary-title")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print rendered wiki markup for each actor")
     parser.add_argument("--char", metavar="NAME",
@@ -287,6 +335,10 @@ def main():
             continue
         total_fails += validate_character(char, args.verbose)
         total_fails += validate_wealth(char, exporter, args.verbose)
+
+    # ── Campaign stats ────────────────────────────────────────────────────────
+    if not args.char:
+        total_fails += validate_campaign_stats(exporter, args.verbose)
 
     # ── NPCs ──────────────────────────────────────────────────────────────────
     if args.npcs:
