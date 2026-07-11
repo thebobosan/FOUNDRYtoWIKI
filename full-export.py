@@ -424,6 +424,7 @@ def _read_boost_slot(slot):
     Slot shapes:
       "str"                                 → "str"   (plain fixed)
       {"value": "con"}                      → "con"   (dict fixed, single)
+      {"value": ["con"]}                    → "con"   (forced boost, one option — nothing to choose)
       {"value": ["int","str"], "selected":"str"} → "str"  (player chose STR)
       {"value": ["str","dex","con",...6..], "selected":"wis"} → "wis" (free pick)
       {"value": ["str","dex","con",...6..], "selected":null}  → None  (not yet chosen)
@@ -440,7 +441,11 @@ def _read_boost_slot(slot):
     if isinstance(val, str):
         return val
     if isinstance(val, list):
-        return None              # any list without a selected key = unrecorded choice, skip
+        # A single-element list is a forced boost — there was only one
+        # possible ability, so Foundry never records a "selected" key.
+        # A multi-element list with no "selected" is a genuine unresolved
+        # free-pick choice and must be skipped.
+        return val[0] if len(val) == 1 else None
     return None
 
 
@@ -1458,6 +1463,47 @@ class FullExporter:
         prof_bonus = (level + rank * 2) if rank > 0 else 0
         return prof_bonus + ability_mod, rank
 
+    def _calc_hp_max(self, items: list, level: int, con_mod: int, hp_val: int) -> int:
+        """
+        Reconstruct max HP from first principles.
+
+        Foundry never persists system.attributes.hp.max for PC actors — it's
+        derived client-side and not written back to the LevelDB document — so
+        it must be rebuilt the same way ability scores/ranks are: from the
+        ancestry/class items plus conMod.
+
+        Formula: ancestryHP + level * (classHP + conMod), plus any flat HP
+        rule bonuses (e.g. the Toughness feat) expressed as a literal int.
+        Rule values given as roll-formula strings (e.g. "@actor.level") are
+        skipped — evaluating arbitrary Foundry formulas is out of scope.
+        """
+        ancestry_hp = 0
+        class_hp    = 0
+        for item in items:
+            itype = item.get("type")
+            if itype == "ancestry":
+                ancestry_hp = _int((item.get("system") or {}).get("hp", 0))
+            elif itype == "class":
+                class_hp = _int((item.get("system") or {}).get("hp", 0))
+
+        bonus = 0
+        for item in items:
+            for rule in (item.get("system") or {}).get("rules") or []:
+                if not isinstance(rule, dict):
+                    continue
+                if rule.get("key") not in ("FlatModifier", "ItemAlteration"):
+                    continue
+                selector = rule.get("selector") or rule.get("property")
+                selectors = selector if isinstance(selector, list) else [selector]
+                if not any(s in ("hp", "hp-max") for s in selectors):
+                    continue
+                value = rule.get("value")
+                if isinstance(value, (int, float)):
+                    bonus += _int(value)
+
+        base = ancestry_hp + level * (class_hp + con_mod) + bonus
+        return max(base, hp_val)
+
     # ── Character parsing ─────────────────────────────────────────────────
 
     def _get_detail_field(self, details: dict, key: str) -> str:
@@ -1473,7 +1519,6 @@ class FullExporter:
         bio      = details.get("biography") or {}
 
         hp_data  = attrs.get("hp") or {}
-        hp_max   = _int((hp_data.get("max") or hp_data.get("value", 0)) if isinstance(hp_data, dict) else 0)
         hp_val   = _int(hp_data.get("value", 0) if isinstance(hp_data, dict) else 0)
         hp_temp  = _int(hp_data.get("temp", 0) if isinstance(hp_data, dict) else 0)
 
@@ -1486,6 +1531,13 @@ class FullExporter:
 
         abilities = {ab: self._get_ability_mod(system, ab, items)
                      for ab in ("str", "dex", "con", "int", "wis", "cha")}
+
+        # hp.max is never persisted by Foundry for PC actors — it's derived
+        # client-side. Prefer a stored value if one ever shows up, otherwise
+        # reconstruct from ancestry/class/conMod like other derived stats.
+        stored_max = hp_data.get("max") if isinstance(hp_data, dict) else None
+        hp_max = (_int(stored_max) if stored_max is not None
+                  else self._calc_hp_max(items, level, abilities["con"], hp_val))
 
         # Compute rules-based ranks once — reads ActiveEffectLike rules on
         # class/class-feature items with level predicates (e.g. Expert Fort at lvl 3)
