@@ -2995,7 +2995,8 @@ class SessionExporter:
                     spk      = m.get("speaker") or {}
                     actor_id = spk.get("actor", "")
                     if actor_id:
-                        rolls.append({"actor_id": actor_id, "scene": spk.get("scene", ""), "ts": ts})
+                        rolls.append({"actor_id": actor_id, "token_id": spk.get("token", ""),
+                                      "scene": spk.get("scene", ""), "ts": ts})
         except Exception as e:
             print(f"  ⚠  Could not read messages database: {e}")
         finally:
@@ -3010,42 +3011,45 @@ class SessionExporter:
 
         characters_present: set[str]   = set()
         enemies_encountered: list[dict] = []
-        seen_enemies:        set[str]  = set()
+        seen_tokens:          set[str] = set()
         scenes:               set[str] = set()
 
         for roll in rolls:
             actor_id = roll["actor_id"]
+            token_id = roll.get("token_id") or actor_id
             if roll.get("scene"):
                 scenes.add(roll["scene"])
 
             if actor_id in char_by_id:
                 characters_present.add(char_by_id[actor_id])
-            elif actor_id in npc_by_id and actor_id not in seen_enemies:
-                seen_enemies.add(actor_id)
+            elif actor_id in npc_by_id and token_id not in seen_tokens:
+                seen_tokens.add(token_id)
                 npc = npc_by_id[actor_id]
-                enemies_encountered.append({"id": actor_id, "name": npc["name"],
+                enemies_encountered.append({"id": actor_id, "token_id": token_id,
+                                             "name": npc["name"],
                                              "img": npc.get("portrait", ""), "killed": False})
 
-        # Enemies killed: downing events (dying/unconscious condition cards)
-        # within the session window whose victim is an NPC.
-        killed_npc_ids: set[str] = set()
+        # Enemies killed: token-level ActorDelta HP<=0 kills within the
+        # session window (see _build_npc_kill_events — condition cards don't
+        # exist for NPCs, so downing events can't be used here).
+        killed_token_ids: set[str] = set()
         if start is not None and end is not None:
             start_ms = start.timestamp() * 1000
             end_ms   = end.timestamp()   * 1000
-            for ev in self.full_exporter._build_downing_events():
-                vic_id = ev.get("victim_id", "")
-                ts     = ev.get("ts", 0)
-                if vic_id in npc_by_id and start_ms <= float(ts) <= end_ms:
-                    killed_npc_ids.add(vic_id)
+            for ev in self.full_exporter._build_npc_kill_events():
+                vic_token_id = ev.get("victim_id", "")
+                ts           = ev.get("ts", 0)
+                if vic_token_id in seen_tokens and start_ms <= float(ts) <= end_ms:
+                    killed_token_ids.add(vic_token_id)
 
         for enemy in enemies_encountered:
-            if enemy["id"] in killed_npc_ids:
+            if enemy["token_id"] in killed_token_ids:
                 enemy["killed"] = True
 
         return {
             "characters_present":  sorted(characters_present),
             "enemies_encountered": enemies_encountered,
-            "enemies_killed":      len(killed_npc_ids),
+            "enemies_killed":      len(killed_token_ids),
             "num_combats":         len(scenes),
         }
 
