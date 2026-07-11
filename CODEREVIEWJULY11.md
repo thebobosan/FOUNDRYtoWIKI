@@ -113,7 +113,7 @@ Two separate fights on the same map/scene within one session window collapse int
 
 ---
 
-### 12. Self-referential/cyclic `containerId` silently drops items from rendered inventory
+### 12. ✅ FIXED Self-referential/cyclic `containerId` silently drops items from rendered inventory
 **Agent 3 | Lines: ~2193–2276 (`_render_container_tree` / `_section_inventory`)**
 
 An item whose `containerId` points to itself, or two containers whose `containerId`s form a 2-cycle, never resolves to a valid top-level root — it's simply never placed and vanishes from the rendered page with no error. Requires corrupted/unusual data to trigger; not observed in the fixture, but there's no defense against it.
