@@ -3877,6 +3877,26 @@ class SessionExporter:
     def _snapshot_path(self, label: str = "latest") -> Path:
         return self.SNAPSHOT_DIR / f"snapshot_{label}.json"
 
+    def _baseline_snapshot_path(self, before_date_str: str) -> Path | None:
+        """
+        Most recent dated snapshot strictly before `before_date_str`
+        (YYYYMMDD) — the correct diff baseline for both a same-day
+        `--session` rerun (must not diff against a snapshot an earlier run
+        already saved *today*) and a `--session-date` rebuild (must not diff
+        against today's snapshot_latest.json, which has nothing to do with
+        the historical window being rebuilt). Falls back to
+        snapshot_latest.json only when no dated snapshots exist yet (very
+        first run, before any dated archive has been written).
+        """
+        dated = sorted(
+            f for f in self.SNAPSHOT_DIR.glob("snapshot_????????.json")
+            if f.stem.split("_", 1)[1] < before_date_str
+        )
+        if dated:
+            return dated[-1]
+        legacy = self._snapshot_path("latest")
+        return legacy if legacy.exists() else None
+
     def _save_snapshot(self, all_chars: list, date_label: str):
         PHYSICAL = {"weapon","armor","shield","consumable","ammo",
                     "equipment","treasure","backpack","kit"}
@@ -3913,9 +3933,11 @@ class SessionExporter:
             except OSError:
                 pass
 
-    def _compute_loot(self, all_chars: list, party_ids: frozenset = frozenset()) -> tuple[list[dict], list[dict]]:
-        """Return (gained, removed) item lists relative to the latest snapshot."""
-        snap_file = self._snapshot_path("latest")
+    def _compute_loot(self, all_chars: list, party_ids: frozenset = frozenset(),
+                       snap_file: Path | None = None) -> tuple[list[dict], list[dict]]:
+        """Return (gained, removed) item lists relative to snap_file (defaults to the latest snapshot)."""
+        if snap_file is None:
+            snap_file = self._snapshot_path("latest")
         if not snap_file.exists():
             print("  ⚠  No previous snapshot — loot diff unavailable for first run.")
             return [], []
@@ -3970,9 +3992,11 @@ class SessionExporter:
 
         return gained, removed
 
-    def _compute_xp(self, all_chars: list, characters_present: list) -> list[dict]:
+    def _compute_xp(self, all_chars: list, characters_present: list,
+                     snap_file: Path | None = None) -> list[dict]:
         """
-        Return XP gained this session for each PC in characters_present.
+        Return XP gained this session for each PC in characters_present,
+        relative to snap_file (defaults to the latest snapshot).
 
         PF2e resets a character's xp field to a small remainder after a
         level-up, so a raw xp delta would go negative across a level-up
@@ -3980,7 +4004,8 @@ class SessionExporter:
         standard track is 1000 xp per level) so the delta stays correct
         regardless of how many level-ups happened in between.
         """
-        snap_file = self._snapshot_path("latest")
+        if snap_file is None:
+            snap_file = self._snapshot_path("latest")
         if not snap_file.exists():
             return []
 
@@ -4203,12 +4228,16 @@ class SessionExporter:
         party_ids    = frozenset(p["id"] for p in party_actors)
         inventory_entities = all_chars + party_actors
 
-        # Compute loot and XP BEFORE saving snapshot so we diff against yesterday's state
-        loot, removed = self._compute_loot(inventory_entities, party_ids)
+        # Diff against the most recent dated snapshot strictly before this
+        # window's date — never "latest", which a same-day rerun or a
+        # --session-date rebuild of a past window could point at a snapshot
+        # that has nothing to do with the state actually being diffed.
+        baseline_path = self._baseline_snapshot_path(date_str)
+        loot, removed = self._compute_loot(inventory_entities, party_ids, snap_file=baseline_path)
         print(f"  Loot items gained:  {len(loot)}")
         print(f"  Items removed:      {len(removed)}")
 
-        xp_data = self._compute_xp(all_chars, session_data["characters_present"])
+        xp_data = self._compute_xp(all_chars, session_data["characters_present"], snap_file=baseline_path)
         print(f"  XP changes:         {len(xp_data)}")
 
         char_by_id    = {c["id"]: c["name"] for c in all_chars if c.get("id")}
@@ -4239,10 +4268,7 @@ class SessionExporter:
                 self._save_snapshot(inventory_entities, date_str)
             return
 
-        if not is_rebuild:
-            # Save snapshot for next run's diff
-            self._save_snapshot(inventory_entities, date_str)
-        else:
+        if is_rebuild:
             print(f"  –  Rebuild of a past window — snapshot not re-saved.")
 
         ingame_date = None if is_rebuild else self._read_ingame_date()
@@ -4258,9 +4284,18 @@ class SessionExporter:
         if current and self._comparable(current) == self._comparable(markup):
             print(f"  –  Session page unchanged: {page_title}")
         else:
+            # page.edit can raise (network/auth/maxlag) — save the snapshot
+            # only once the write is known to have gone through, so a failed
+            # push doesn't silently advance the baseline and permanently
+            # lose this session's loot/XP diff.
             page.edit(markup, summary=f"Auto-sync: Session log {date_str}")
             action = "Updated" if current else "Created"
             print(f"  ✓  {action}: {page_title}")
+
+        if not is_rebuild:
+            # Save snapshot for next run's diff, now that the push succeeded
+            # (or the page was already up to date).
+            self._save_snapshot(inventory_entities, date_str)
 
 
 # ════════════════════════════════════════════════════════════════════════════
