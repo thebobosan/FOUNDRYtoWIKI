@@ -719,6 +719,8 @@ class FullExporter:
         if self._combat_record is not None:
             return self._combat_record
 
+        _, type_by_actor = self._actor_maps()
+
         record: dict = {}
         events = self._build_downing_events() + self._build_npc_kill_events()
         events.sort(key=lambda e: e["ts"])
@@ -728,8 +730,12 @@ class FullExporter:
             vic_id, vic_name = ev["victim_id"],   ev["victim_name"]
             ts               = ev["ts"]
 
-            # Victim: record who downed them (most recent wins — last assignment)
-            if vic_id:
+            # Victim: record who downed them (most recent wins — last assignment).
+            # NPC kill events key victim_id by token id, not actor id (see
+            # _build_npc_kill_events), so skip the write when it isn't a known
+            # actor id — otherwise combat_record() ends up with phantom
+            # "actor" entries keyed by token id.
+            if vic_id and vic_id in type_by_actor:
                 rec = record.setdefault(vic_id, {"last_kill": None, "last_downed_by": None})
                 if atk_name and atk_id != vic_id:
                     rec["last_downed_by"] = {"name": atk_name, "ts": ts}
