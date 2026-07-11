@@ -3061,13 +3061,27 @@ class SessionExporter:
         characters_present: set[str]   = set()
         enemies_encountered: list[dict] = []
         seen_tokens:          set[str] = set()
-        scenes:               set[str] = set()
+
+        # Cluster initiative rolls into distinct encounters: a new encounter
+        # starts when the scene changes or when there's a >30-minute gap
+        # since the last roll. data/combats is unreliable (see CLAUDE.md), and
+        # counting distinct scenes alone collapses two separate fights on the
+        # same map into one.
+        ENCOUNTER_GAP_MS = 30 * 60 * 1000
+        num_combats = 0
+        prev_scene  = None
+        prev_ts     = None
+        for roll in sorted(rolls, key=lambda r: r.get("ts", 0)):
+            scene = roll.get("scene")
+            ts    = roll.get("ts", 0)
+            if (prev_scene is None or scene != prev_scene
+                    or (prev_ts is not None and float(ts) - float(prev_ts) > ENCOUNTER_GAP_MS)):
+                num_combats += 1
+            prev_scene, prev_ts = scene, ts
 
         for roll in rolls:
             actor_id = roll["actor_id"]
             token_id = roll.get("token_id") or actor_id
-            if roll.get("scene"):
-                scenes.add(roll["scene"])
 
             if actor_id in char_by_id:
                 characters_present.add(char_by_id[actor_id])
@@ -3099,7 +3113,7 @@ class SessionExporter:
             "characters_present":  sorted(characters_present),
             "enemies_encountered": enemies_encountered,
             "enemies_killed":      len(killed_token_ids),
-            "num_combats":         len(scenes),
+            "num_combats":         num_combats,
         }
 
     def _snapshot_path(self, label: str = "latest") -> Path:
