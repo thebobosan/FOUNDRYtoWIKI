@@ -117,19 +117,99 @@ def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
             f'alt="{alt_attr}" style="vertical-align:middle;" /></html>')
 
 
-def wiki_tooltip(name: str, desc_plain: str = "", max_len: int = 600) -> str:
+def item_stat_line(item: dict) -> str:
+    """
+    Build a short crunch summary (damage, AC bonus, traits, price, etc.)
+    for an item, for use alongside its flavor description in a tooltip.
+    The Foundry description text is pure flavor prose — none of a
+    weapon's damage die, an armor's AC bonus, or a shield's Hardness/HP
+    live in it, so it has to be assembled separately from system fields.
+    """
+    s     = item.get("system") or {}
+    itype = item.get("type")
+    parts = []
+
+    if itype == "weapon":
+        dmg = s.get("damage") or {}
+        dice, die, dtype = dmg.get("dice"), dmg.get("die"), dmg.get("damageType")
+        if dice and die:
+            dmg_str = f"{dice}{die}"
+            if dtype:
+                dmg_str += f" {dtype}"
+            parts.append(dmg_str)
+        cat, grp = s.get("category"), s.get("group")
+        if cat or grp:
+            parts.append(" ".join(str(x).title() for x in (cat, grp) if x))
+        rng = s.get("range")
+        if rng:
+            parts.append(f"Range {rng} ft.")
+        reload_v = (s.get("reload") or {}).get("value")
+        if reload_v:
+            parts.append(f"Reload {reload_v}")
+
+    elif itype == "armor":
+        ac = s.get("acBonus")
+        if ac is not None:
+            parts.append(f"AC {fmt_mod(ac)}")
+        cat = s.get("category")
+        if cat:
+            parts.append(str(cat).title())
+        dex_cap = s.get("dexCap")
+        if dex_cap is not None:
+            parts.append(f"Dex Cap +{dex_cap}")
+        str_req = s.get("strength")
+        if str_req is not None:
+            parts.append(f"Str {str_req}")
+        cp = s.get("checkPenalty")
+        if cp:
+            parts.append(f"Check {cp}")
+        sp = s.get("speedPenalty")
+        if sp:
+            parts.append(f"Speed {sp} ft.")
+
+    elif itype == "shield":
+        ac = s.get("acBonus")
+        if ac is not None:
+            parts.append(f"AC {fmt_mod(ac)}")
+        hardness = s.get("hardness")
+        if hardness is not None:
+            parts.append(f"Hardness {hardness}")
+        hp = s.get("hp") or {}
+        if isinstance(hp, dict) and hp.get("max"):
+            parts.append(f"HP {hp.get('value', 0)}/{hp['max']}")
+
+    elif itype == "consumable":
+        cat = s.get("category")
+        if cat:
+            parts.append(str(cat).title())
+
+    traits = ((s.get("traits") or {}).get("value") or [])
+    if traits:
+        parts.append("Traits: " + ", ".join(str(t).title() for t in traits))
+
+    price_node = (s.get("price") or {}).get("value") or {}
+    if isinstance(price_node, dict):
+        price_str = ", ".join(f"{price_node[c]} {c}" for c in ("pp", "gp", "sp", "cp")
+                              if price_node.get(c))
+        if price_str:
+            parts.append(price_str)
+
+    return " • ".join(parts)
+
+
+def wiki_tooltip(name: str, desc_plain: str = "", stat_line: str = "", max_len: int = 600) -> str:
     """
     Render an item name as inline HTML with a native browser tooltip (the
-    'title' attribute) showing its description, instead of a MediaWiki
-    [[link]] to a per-item page that doesn't exist. Requires $wgRawHtml =
-    true, same as wiki_img.
+    'title' attribute) showing its stats and description, instead of a
+    MediaWiki [[link]] to a per-item page that doesn't exist. Requires
+    $wgRawHtml = true, same as wiki_img.
 
     desc_plain must already be plain text (e.g. via strip_html) — a title
     attribute renders as literal text, so wikitext/HTML markup would show
     up as raw '''/[[ ]]/<tags> in the tooltip rather than being rendered.
     """
     name_esc = html.escape(name, quote=True)
-    text = (desc_plain or "").strip()
+    text = "\n".join(t for t in (stat_line.strip(), desc_plain.strip()) if t)
     if not text:
         return f'<html><span title="{name_esc}">{name_esc}</span></html>'
     if len(text) > max_len:
@@ -2385,12 +2465,13 @@ class FullExporter:
                 pnode = s.get("price", {}).get("value", {}) if isinstance(s.get("price"), dict) else {}
                 price = ", ".join(f"{pnode[c]} {c}" for c in ("pp","gp","sp","cp")
                                   if isinstance(pnode, dict) and pnode.get(c)) or "—"
-                img       = icon_url(item.get("img", ""), itype)
-                desc_node = s.get("description") or {}
-                desc_raw  = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
+                img        = icon_url(item.get("img", ""), itype)
+                desc_node  = s.get("description") or {}
+                desc_raw   = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
                 desc_plain = strip_html(desc_raw)
+                name_html  = wiki_tooltip(name, desc_plain, item_stat_line(item))
                 lines.append("|-")
-                lines.append(f"| {wiki_img(img, 24, name)} || {wiki_tooltip(name, desc_plain)} || {qty} || {bulk} || {lvl} || {price}")
+                lines.append(f"| {wiki_img(img, 24, name)} || {name_html} || {qty} || {bulk} || {lvl} || {price}")
                 if itype == "backpack" and item.get("_id") in cont_contents:
                     lines.append("|-")
                     lines.append('| colspan="6" |')
@@ -2413,7 +2494,7 @@ class FullExporter:
             icon_s     = wiki_img(img, 16, name) + " " if img else ""
             desc_node  = s.get("description") or {}
             desc_raw   = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
-            name_html  = wiki_tooltip(name, strip_html(desc_raw))
+            name_html  = wiki_tooltip(name, strip_html(desc_raw), item_stat_line(item))
             bullet     = "*" * depth
             if item.get("type") == "backpack":
                 lines.append(f"{bullet} {icon_s}'''{name_html}'''")
