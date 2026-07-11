@@ -75,9 +75,18 @@ GENERIC_ICON_FRAGMENTS = ("default-icons", "mystery-man", "iconics")
 # Utility helpers
 # ════════════════════════════════════════════════════════════════════════════
 
-def icon_url(img: str, item_type: str = "") -> str:
+def icon_url(img: str, item_type: str = "", allow_iconics: bool = False) -> str:
+    """
+    allow_iconics: when True, an "iconics" path (Paizo's bundled iconic-hero
+    art, e.g. Ezren) is treated as a real portrait rather than a generic
+    placeholder. Only actor portraits should pass this — for items,
+    "iconics" in the path is still a placeholder signal.
+    """
     path = img or ""
-    is_generic = not path or any(f in path for f in GENERIC_ICON_FRAGMENTS)
+    fragments = GENERIC_ICON_FRAGMENTS
+    if allow_iconics:
+        fragments = tuple(f for f in fragments if f != "iconics")
+    is_generic = not path or any(f in path for f in fragments)
     if is_generic:
         path = DEFAULT_ICONS.get(item_type, "")
     if not path:
@@ -2313,7 +2322,7 @@ class FullExporter:
         lang_list = (lang_f.get("value", []) if isinstance(lang_f, dict)
                      else (lang_f if isinstance(lang_f, list) else []))
 
-        portrait = icon_url(actor.get("img", ""), "character")
+        portrait = icon_url(actor.get("img", ""), "character", allow_iconics=True)
 
         feats, spells, spell_entries = [], [], {}
         for item in items:
@@ -3015,7 +3024,7 @@ class FullExporter:
         return {
             "name":         actor.get("name"),
             "id":           actor_id,
-            "portrait":     icon_url(actor.get("img", ""), "character"),
+            "portrait":     icon_url(actor.get("img", ""), "character", allow_iconics=True),
             "level":        level,
             "size":         size_label,
             "creature_type":creature_type,
