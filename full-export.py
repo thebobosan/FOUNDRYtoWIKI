@@ -1277,6 +1277,73 @@ class FullExporter:
 
         return True  # unknown predicate format → assume applies
 
+    @staticmethod
+    def _predicate_facts_true(predicate, facts: set) -> bool:
+        """
+        Evaluate an "item:equipped" / "armor:base:X" / "armor:category:X"
+        style predicate (as used by ItemAlteration rules) against a set of
+        known-true fact strings. Handles string atoms, {"or"/"and"/"not": ...}
+        combinators, and top-level lists (implicit AND). Unrecognized dict
+        shapes (e.g. numeric gte/lte comparisons unrelated to these facts)
+        conservatively evaluate to False rather than risk a false-positive
+        stat bonus.
+        """
+        if predicate is None:
+            return True
+        if isinstance(predicate, str):
+            return predicate in facts
+        if isinstance(predicate, dict):
+            if "or" in predicate:
+                return any(FullExporter._predicate_facts_true(p, facts) for p in predicate["or"])
+            if "and" in predicate:
+                return all(FullExporter._predicate_facts_true(p, facts) for p in predicate["and"])
+            if "not" in predicate:
+                return not FullExporter._predicate_facts_true(predicate["not"], facts)
+            return False
+        if isinstance(predicate, list):
+            return all(FullExporter._predicate_facts_true(p, facts) for p in predicate)
+        return False
+
+    def _armor_alteration(self, equipped_armor: dict, items: list, prop: str) -> int:
+        """
+        Net add/subtract delta that other equipped items' ItemAlteration
+        rules (e.g. the Armored Skirt's "+1 ac-bonus while wearing chain
+        mail/breastplate/etc") apply to the worn armor's `prop`. These rules
+        live on the *other* item, not the armor's own data, so `_calc_ac`
+        can't see them just by reading the armor item. "override" mode is
+        rare for these properties and not handled here.
+        """
+        s        = equipped_armor.get("system") or {}
+        base_raw = s.get("baseItem")
+        base     = base_raw.get("value") if isinstance(base_raw, dict) else base_raw
+        cat_raw  = s.get("category", "unarmored")
+        cat      = cat_raw.get("value", "unarmored") if isinstance(cat_raw, dict) else (cat_raw or "unarmored")
+
+        facts = {"item:equipped"}
+        if base:
+            facts.add(f"armor:base:{base}")
+        if cat:
+            facts.add(f"armor:category:{cat}")
+
+        delta = 0
+        for item in items:
+            if item is equipped_armor or not self._is_equipped(item):
+                continue
+            for rule in (item.get("system") or {}).get("rules") or []:
+                if not isinstance(rule, dict) or rule.get("key") != "ItemAlteration":
+                    continue
+                if rule.get("itemType") != "armor" or rule.get("property") != prop:
+                    continue
+                if not self._predicate_facts_true(rule.get("predicate"), facts):
+                    continue
+                value = _int(rule.get("value", 0))
+                mode  = rule.get("mode")
+                if mode == "add":
+                    delta += value
+                elif mode == "subtract":
+                    delta -= value
+        return delta
+
     def _save_rank(self, system: dict, items: list, slug: str,
                    rules_ranks: dict = None) -> int:
         # 1. Pre-computed rank stored on the actor (present in some Foundry versions)
@@ -1402,7 +1469,7 @@ class FullExporter:
                          if i.get("type") == "armor" and self._is_equipped(i)), None)
         if equipped:
             s       = equipped.get("system") or {}
-            ac_val  = _int(s.get("acBonus", 0))
+            ac_val  = _int(s.get("acBonus", 0)) + self._armor_alteration(equipped, items, "ac-bonus")
             cat_raw = s.get("category", "unarmored")
             cat     = cat_raw.get("value", "unarmored") if isinstance(cat_raw, dict) else (cat_raw or "unarmored")
             potency = _int((s.get("potencyRune") or {}).get("value", 0)
@@ -1410,6 +1477,7 @@ class FullExporter:
             dex_cap_raw = s.get("dexCap")
             dex_cap = _int(dex_cap_raw.get("value", 99)
                            if isinstance(dex_cap_raw, dict) else (dex_cap_raw if dex_cap_raw is not None else 99))
+            dex_cap += self._armor_alteration(equipped, items, "dex-cap")
         else:
             ac_val, cat, potency, dex_cap = 0, "unarmored", 0, 99
 
