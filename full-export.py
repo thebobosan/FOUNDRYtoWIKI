@@ -2234,6 +2234,31 @@ class FullExporter:
             lines.append("")
         return "\n".join(lines)
 
+    @staticmethod
+    def _container_chain_has_cycle(item_id: str, item_map: dict, depth_cap: int = 20) -> bool:
+        """
+        Walk an item's containerId chain toward the root. Returns True if
+        the chain loops back on itself (self-referential or multi-item
+        cycle) rather than terminating at a true top-level item — such an
+        item would otherwise never resolve to a top-level slot and vanish
+        from the rendered inventory with no error.
+        """
+        seen    = {item_id}
+        current = item_id
+        for _ in range(depth_cap):
+            item = item_map.get(current)
+            if not item:
+                return False
+            sys_data = item.get("system") or {}
+            cid = sys_data.get("containerId") if isinstance(sys_data, dict) else None
+            if not cid or cid not in item_map:
+                return False
+            if cid in seen:
+                return True
+            seen.add(cid)
+            current = cid
+        return True  # depth cap exceeded without resolving — treat as cyclic
+
     def _section_inventory(self, items: list) -> str:
         PHYSICAL = {"weapon","armor","shield","consumable","ammo",
                     "equipment","treasure","backpack","kit"}
@@ -2245,7 +2270,9 @@ class FullExporter:
         for item in physical:
             sys_data = item.get("system") or {}
             cid      = sys_data.get("containerId") if isinstance(sys_data, dict) else None
-            if cid and cid in item_map:
+            item_id  = item.get("_id")
+            if (cid and cid in item_map
+                    and not (item_id and self._container_chain_has_cycle(item_id, item_map))):
                 cont_contents.setdefault(cid, []).append(item)
             else:
                 top.setdefault(item.get("type"), []).append(item)
