@@ -138,9 +138,13 @@ ideas from there.)
    damage dealt/taken across the campaign) instead of only surfacing the single most recent event
    in the infobox.
 
-5. **In-game timeline.** `_read_ingame_date` already decodes the Seasons & Stars calendar; record
+5. ✅ IMPLEMENTED (2026-07-11, `render_campaign_timeline_page()` / `push_campaign_timeline()`)
+   **In-game timeline.** `_read_ingame_date` already decodes the Seasons & Stars calendar; record
    the in-game date per session into the snapshot and render a campaign timeline page mapping
-   real-world sessions to Vux calendar dates.
+   real-world sessions to Vux calendar dates. Per-session in-game dates were already being recorded
+   into `session_index.json` as part of implementing suggestion #3; this added the dedicated
+   "Campaign Timeline" page (same data as the "Sessions" index, sorted oldest-first instead of
+   newest-first), auto-regenerated alongside it on every `--session` push.
 
 6. **Journal export.** Foundry journals (`data/journal` LevelDB) hold the GM's lore/handout
    content; the HTML→wikitext converter already exists. Exporting journals (with a folder-based

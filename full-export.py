@@ -4520,18 +4520,14 @@ class SessionExporter:
                 page.edit(patched, summary="Auto-sync: update session nav links.")
                 print(f"  ↪  Updated nav links: {title}")
 
-    def render_sessions_index_page(self, index: dict) -> str:
-        """Render the 'Sessions' index page: one row per session date, newest
-        first, linking to each Sessions/YYYYMMDD page."""
-        lines = [
-            "= Sessions =",
-            "",
-            "''Auto-generated index of all session logs.''",
-            "",
-            '{| class="wikitable sortable" style="width:100%;"',
-            "! Date !! In-game Date !! Encounters !! Characters Present",
-        ]
-        for date_str in sorted(index.keys(), reverse=True):
+    def _session_table_rows(self, index: dict, reverse: bool) -> list[str]:
+        """Shared wikitable body (Date | In-game Date | Encounters | Characters
+        Present) for the Sessions index (newest first) and Campaign Timeline
+        (oldest first) pages — same columns, same session_index.json source,
+        different sort order and framing."""
+        lines = ['{| class="wikitable sortable" style="width:100%;"',
+                 "! Date !! In-game Date !! Encounters !! Characters Present"]
+        for date_str in sorted(index.keys(), reverse=reverse):
             entry    = index[date_str]
             label    = entry.get("label", date_str)
             ingame   = entry.get("ingame_date") or "—"
@@ -4545,6 +4541,18 @@ class SessionExporter:
                 f"|| {n_combat} || {chars_s}",
             ]
         lines.append("|}")
+        return lines
+
+    def render_sessions_index_page(self, index: dict) -> str:
+        """Render the 'Sessions' index page: one row per session date, newest
+        first, linking to each Sessions/YYYYMMDD page."""
+        lines = [
+            "= Sessions =",
+            "",
+            "''Auto-generated index of all session logs.''",
+            "",
+        ]
+        lines += self._session_table_rows(index, reverse=True)
         lines += [
             "",
             f"''Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
@@ -4552,16 +4560,43 @@ class SessionExporter:
         ]
         return "\n".join(lines)
 
-    def push_sessions_index(self, site, index: dict = None):
-        """Regenerate and push the 'Sessions' index page. Bootstraps any
-        pre-existing wiki pages missing from the local index first."""
+    def render_campaign_timeline_page(self, index: dict) -> str:
+        """Render the 'Campaign Timeline' page: the same per-session data as
+        the Sessions index, but oldest first — a chronological map of
+        real-world session dates to in-game (Vux calendar) dates."""
+        lines = [
+            "= Campaign Timeline =",
+            "",
+            "''Auto-generated chronological map of real-world sessions to "
+            "in-game (Vux calendar) dates.''",
+            "",
+        ]
+        lines += self._session_table_rows(index, reverse=False)
+        lines += [
+            "",
+            f"''Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Sessions]]",
+        ]
+        return "\n".join(lines)
+
+    def _load_full_session_index(self, site, index: dict = None) -> dict:
+        """Load the local index, bootstrap any pre-existing wiki pages it
+        doesn't know about yet, and persist the merged result. Shared by
+        push_sessions_index and push_campaign_timeline so both pages are
+        built from the exact same (freshly-bootstrapped) data."""
         if index is None:
             index = self._load_session_index()
         index = self._bootstrap_session_index(site, index)
+        self._save_session_index(index)
+        return index
+
+    def push_sessions_index(self, site, index: dict = None):
+        """Regenerate and push the 'Sessions' index page. Bootstraps any
+        pre-existing wiki pages missing from the local index first."""
+        index = self._load_full_session_index(site, index)
         if not index:
             print("  ⚠  No session pages found — skipping Sessions index.")
             return
-        self._save_session_index(index)
 
         new_markup     = self.render_sessions_index_page(index)
         page           = site.pages["Sessions"]
@@ -4571,6 +4606,22 @@ class SessionExporter:
             return
         page.edit(new_markup, summary="Auto-sync: regenerate Sessions index.")
         print(f"✓  {'Created' if not current_markup else 'Updated'}: Sessions index")
+
+    def push_campaign_timeline(self, site, index: dict = None):
+        """Regenerate and push the 'Campaign Timeline' page."""
+        index = self._load_full_session_index(site, index)
+        if not index:
+            print("  ⚠  No session pages found — skipping Campaign Timeline.")
+            return
+
+        new_markup     = self.render_campaign_timeline_page(index)
+        page           = site.pages["Campaign Timeline"]
+        current_markup = page.text()
+        if current_markup and self._comparable(current_markup) == self._comparable(new_markup):
+            print("  –  Skipped (no changes): Campaign Timeline")
+            return
+        page.edit(new_markup, summary="Auto-sync: regenerate Campaign Timeline.")
+        print(f"✓  {'Created' if not current_markup else 'Updated'}: Campaign Timeline")
 
     def run(self, site, all_chars: list, start_date: datetime = None):
         start, end = self.session_window(start_date)
@@ -4678,11 +4729,13 @@ class SessionExporter:
             self._save_snapshot(inventory_entities, date_str)
 
         # Keep neighboring pages' nav links correct, then regenerate the
-        # Sessions index page (also backfills any pre-existing pages this
-        # local index doesn't know about yet).
+        # Sessions index and Campaign Timeline pages (also backfills any
+        # pre-existing pages this local index doesn't know about yet).
         self._save_session_index(index)
         self._sync_neighbor_nav(site, index, date_str)
+        index = self._load_full_session_index(site, index)
         self.push_sessions_index(site, index)
+        self.push_campaign_timeline(site, index)
 
 
 # ════════════════════════════════════════════════════════════════════════════
