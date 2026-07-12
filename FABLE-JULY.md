@@ -120,9 +120,23 @@ against the `temporary-title` fixture (1,561 chat messages, 20 downing events).
 config file, logging, retry/exit codes, wealth history, and per-spell descriptions remain good
 ideas from there.)
 
-1. **PC Strikes section.** The math engine already has ability mods, proficiency cascade, and
+1. ✅ IMPLEMENTED (2026-07-11, `_calc_strikes()` / `_weapon_prof_rank()` / `_section_strikes()`)
+   **PC Strikes section.** The math engine already has ability mods, proficiency cascade, and
    potency runes; weapons already carry damage dice via `item_stat_line`. Compute and render an
    "Attacks" table (weapon, attack bonus, damage) — the single biggest crunch gap on PC pages.
+   New weapon-proficiency cascade added (mirrors `_armor_prof_rank`): class item's static
+   `system.attacks.{simple,martial,advanced,unarmed}` (+ `.other` for a single named weapon some
+   classes/deities grant), merged with rules-based upgrades (Weapon Expertise, individual weapon
+   training) via a new generalized `attacks.*` key extraction in `_rules_ranks`. Attack bonus
+   includes the full Multiple Attack Penalty progression (`+9/+4/-1`, `-4/-8` for agile weapons).
+   Ability-modifier selection: finesse → better of Str/Dex; thrown → always Str; true ranged
+   (has a range, not thrown) → Dex, with propulsive halving a positive Str bonus for damage.
+   Known simplifications (documented in code): Dex-based-damage feats aren't modeled (damage
+   always uses Str for melee/thrown), MAP-reducing class feats beyond the agile trait aren't
+   modeled, and a few Gunslinger-specific combined category+group proficiency keys (e.g.
+   `advanced-firearms-crossbows`) are left unhandled since they aren't a deterministic function of
+   the weapon's own fields. Only "readied" weapons (`carryType` held/worn) are shown; per user
+   decision, no synthesized default Unarmed Strike is added when a PC has no weapon items.
 
 2. **Computed spell DC / attack.** `spelldc.dc` is often absent on PC spellcasting entries, so the
    Spellcasting section shows no DC. Reconstruct from key ability + level + a spellcasting

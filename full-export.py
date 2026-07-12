@@ -1627,7 +1627,8 @@ class FullExporter:
              backgrounds and classes that don't use rules for skill grants.
 
         Returns dict mapping short keys → effective rank int, e.g.:
-          "saves.fortitude" → 2, "skills.athletics" → 1, "perception" → 1
+          "saves.fortitude" → 2, "skills.athletics" → 1, "perception" → 1,
+          "attacks.martial" → 2 (Weapon Expertise), "attacks.weapon-base-staff" → 2
         """
         _SKILL_SLUGS = (
             "acrobatics","arcana","athletics","crafting","deception",
@@ -1668,14 +1669,21 @@ class FullExporter:
                     if mode not in ("override", "upgrade"):
                         continue
                     path = self._resolve_rule_path(rule.get("path", ""), item, item_rules)
-                    if path not in PATH_MAP:
+                    if path in PATH_MAP:
+                        key = PATH_MAP[path]
+                    elif path.startswith("system.proficiencies.attacks.") and path.endswith(".rank"):
+                        # Weapon proficiency upgrades (Weapon Expertise, individual
+                        # weapon-group/weapon-base training, etc.) — keyed dynamically
+                        # since the category/group/slug segment varies per feat, unlike
+                        # the fixed saves/skills/defenses paths in PATH_MAP.
+                        key = "attacks." + path[len("system.proficiencies.attacks."):-len(".rank")]
+                    else:
                         continue
                     value = self._eval_rule_value(rule.get("value", 0), level)
                     if value <= 0:
                         continue
                     if not self._rule_applies(rule, level):
                         continue
-                    key = PATH_MAP[path]
                     if mode == "override":
                         ranks[key] = value
                     else:
@@ -1963,6 +1971,50 @@ class FullExporter:
                     return 1
         return 1 if category == "unarmored" else 0
 
+    def _weapon_prof_rank(self, weapon: dict, items: list,
+                           rules_ranks: dict = None) -> int:
+        """
+        Highest applicable proficiency rank for a strike with this weapon:
+          1. Base category rank from the class item's static
+             system.attacks.{simple,martial,advanced,unarmed} (and .other,
+             a single named weapon some classes/deities grant, e.g. a
+             cleric's favored weapon).
+          2. Rules-based upgrades (Weapon Expertise, individual weapon
+             training) via the generalized "attacks.*" keys _rules_ranks
+             extracts from system.proficiencies.attacks.<key>.rank — matched
+             against the weapon's base category and its base weapon type
+             (weapon-base-<baseItem>, e.g. a reskinned "Sword Cane" still
+             matches training in its underlying "rapier").
+        Combined category+group keys some Gunslinger feats use (e.g.
+        "advanced-firearms-crossbows") aren't a deterministic function of
+        the weapon's own fields and are left unhandled — narrow, class-
+        specific gap. Untrained (0) is otherwise a legal result — not every
+        starting weapon is covered by a class's initial proficiencies.
+        """
+        wsys      = weapon.get("system") or {}
+        category  = wsys.get("category") or ""
+        base_item = wsys.get("baseItem") or wsys.get("slug") or ""
+        name      = (weapon.get("name") or "").strip().lower()
+
+        rank = 0
+        for item in items:
+            if item.get("type") != "class":
+                continue
+            s = item.get("system") or {}
+            attacks = s.get("attacks") or {}
+            if not isinstance(attacks, dict):
+                continue
+            rank = max(rank, self._rank_from_node(attacks.get(category)))
+            other = attacks.get("other") or {}
+            if isinstance(other, dict) and other.get("name", "").strip().lower() == name and name:
+                rank = max(rank, self._rank_from_node(other.get("rank", 0)))
+
+        rr = rules_ranks or {}
+        rank = max(rank, rr.get(f"attacks.{category}", 0))
+        if base_item:
+            rank = max(rank, rr.get(f"attacks.weapon-base-{base_item}", 0))
+        return rank
+
     # ── Math engine ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -2053,6 +2105,95 @@ class FullExporter:
 
         prof_bonus = (level + rank * 2) if rank > 0 else 0
         return prof_bonus + ability_mod, rank
+
+    def _calc_strikes(self, items: list, level: int, abilities: dict,
+                       rules_ranks: dict = None) -> list[dict]:
+        """
+        Build the PC Strikes table: one entry per readied (carryType "held"
+        or "worn" — i.e. not stowed in a pack or dropped) weapon item, with
+        attack bonus (including the Multiple Attack Penalty progression) and
+        damage already computed. All ability-modifier and MAP simplifications
+        below are documented at the point they're applied; nothing here reads
+        Foundry's own precomputed strike data (PCs don't reliably have any —
+        same reasoning as the rest of the math engine).
+        """
+        str_mod, dex_mod = abilities.get("str", 0), abilities.get("dex", 0)
+        strikes = []
+
+        for weapon in items:
+            if weapon.get("type") != "weapon":
+                continue
+            s = weapon.get("system") or {}
+            carry = s.get("equipped") or {}
+            carry_type = carry.get("carryType") if isinstance(carry, dict) else None
+            if carry_type not in ("held", "worn"):
+                continue
+
+            traits = set((s.get("traits") or {}).get("value") or [])
+            weapon_range = s.get("range")
+
+            # Ability modifier for the attack roll: finesse picks the better
+            # of Str/Dex; a thrown weapon (even one that's also "ranged" in
+            # the sense of having a range value, e.g. a javelin) always uses
+            # Str unless finesse; a true ranged weapon (bow/sling/firearm/
+            # crossbow — has a range but isn't "thrown") uses Dex.
+            if "finesse" in traits:
+                atk_mod = max(str_mod, dex_mod)
+            elif "thrown" in traits:
+                atk_mod = str_mod
+            elif weapon_range:
+                atk_mod = dex_mod
+            else:
+                atk_mod = str_mod
+
+            rank       = self._weapon_prof_rank(weapon, items, rules_ranks)
+            prof_bonus = (level + rank * 2) if rank > 0 else 0
+            potency    = _int((s.get("potencyRune") or {}).get("value", 0)
+                              if isinstance(s.get("potencyRune"), dict) else s.get("potencyRune", 0))
+            attack_bonus = atk_mod + prof_bonus + potency
+
+            # Agile weapons take a smaller Multiple Attack Penalty (-4/-8
+            # instead of -5/-10) — the only MAP modifier this models; class
+            # features that further reduce MAP (e.g. some Fighter/Gunslinger
+            # feats) aren't accounted for.
+            map_step = 4 if "agile" in traits else 5
+            atk_line = "/".join(fmt_mod(attack_bonus - map_step * n) for n in range(3))
+
+            dmg      = s.get("damage") or {}
+            dice     = _int(dmg.get("dice", 1) or 1)
+            die      = dmg.get("die") or "d4"
+            dtype    = dmg.get("damageType") or ""
+            striking = _int((s.get("strikingRune") or {}).get("value", 0)
+                            if isinstance(s.get("strikingRune"), dict) else s.get("strikingRune", 0))
+            total_dice = dice + striking
+
+            # Damage ability modifier: full Str for melee/thrown/finesse
+            # weapons (finesse damage still defaults to Str per RAW, even
+            # when Dex was used for the attack roll — Dex-based damage
+            # feats aren't modeled); a true ranged weapon adds no ability
+            # modifier unless "propulsive" (half Str, rounded down, only
+            # when positive; a Str penalty still applies in full).
+            if weapon_range and "thrown" not in traits:
+                if "propulsive" in traits:
+                    dmg_mod = str_mod // 2 if str_mod > 0 else str_mod
+                else:
+                    dmg_mod = 0
+            else:
+                dmg_mod = str_mod
+
+            dmg_bonus_s = f"+{dmg_mod}" if dmg_mod > 0 else (str(dmg_mod) if dmg_mod < 0 else "")
+            dmg_line    = f"{total_dice}{die}{dmg_bonus_s}" + (f" {dtype}" if dtype else "")
+
+            strikes.append({
+                "name": weapon.get("name", "Unknown"),
+                "img":  icon_url(weapon.get("img", ""), "weapon"),
+                "traits": sorted(traits),
+                "rank": rank,
+                "attack_line": atk_line,
+                "damage_line": dmg_line,
+            })
+
+        return strikes
 
     def _calc_hp_max(self, items: list, level: int, con_mod: int, hp_val: int) -> int:
         """
@@ -2147,6 +2288,7 @@ class FullExporter:
         # class/class-feature items with level predicates (e.g. Expert Fort at lvl 3)
         rules_ranks              = self._rules_ranks(items, level)
 
+        strikes                  = self._calc_strikes(items, level, abilities, rules_ranks)
         ac                       = self._calc_ac(system, items, level, abilities["dex"], rules_ranks)
         fort_total, fort_rank    = self._calc_save(system, items, "fortitude", abilities["con"], level, rules_ranks)
         ref_total,  ref_rank     = self._calc_save(system, items, "reflex",    abilities["dex"], level, rules_ranks)
@@ -2508,7 +2650,7 @@ class FullExporter:
             "likes": likes, "dislikes": dislikes, "catchphrases": catchphrases,
             "campaign_notes": campaign_notes, "allies": allies,
             "enemies": enemies, "organizations": organizations,
-            "items": items, "feats": feats,
+            "items": items, "feats": feats, "strikes": strikes,
             "spell_entries": list(spell_entries.values()),
             "orphan_spells": spells,
         }
@@ -2631,6 +2773,25 @@ class FullExporter:
             cond_parts = [f"{c['name']} {c['value']}" if c.get("value") else c["name"]
                           for c in char["conditions"]]
             lines.append(f"* '''Active Conditions:''' {', '.join(cond_parts)}")
+        return "\n".join(lines)
+
+    def _section_strikes(self, char: dict) -> str:
+        strikes = char.get("strikes") or []
+        if not strikes:
+            return ""
+        lines = [
+            '{| class="wikitable"',
+            "! !! Weapon !! Traits !! Attack Bonus !! Damage",
+        ]
+        for st in strikes:
+            icon_s  = wiki_img(st["img"], 24, st["name"]) if st.get("img") else ""
+            traits_s = ", ".join(t.title() for t in st["traits"]) if st["traits"] else "—"
+            lines += [
+                "|-",
+                f"| {icon_s} || {wiki_escape(st['name'])} ({self._fmt_prof(st['rank'])}) "
+                f"|| {traits_s} || {st['attack_line']} || {st['damage_line']}",
+            ]
+        lines.append("|}")
         return "\n".join(lines)
 
     def _section_abilities(self, char: dict) -> str:
@@ -3249,6 +3410,7 @@ class FullExporter:
         lines.append(self._section_details(char))
 
         defense_content  = self._section_defense(char)
+        strikes_content  = self._section_strikes(char)
         ability_content  = self._section_abilities(char)
         skill_content    = self._section_skills(char)
         wealth_content   = self._section_wealth(char)
@@ -3257,6 +3419,8 @@ class FullExporter:
         spell_content    = self._section_spells(char)
 
         lines.append(collapsible("⚔ Defense & Saves",     defense_content))
+        if strikes_content:
+            lines.append(collapsible("🗡 Attacks",         strikes_content))
         lines.append(collapsible("📊 Ability Scores",     ability_content))
         lines.append(collapsible("🎓 Skills",             skill_content))
         lines.append(collapsible("💰 Wealth & Carry",     wealth_content))
