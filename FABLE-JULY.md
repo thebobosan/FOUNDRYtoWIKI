@@ -157,5 +157,6 @@ ideas from there.)
 9. ✅ IMPLEMENTED (2026-07-11, `render_party_overview_page()` / `--overview`) **Party overview table.** A `Party` page row per PC — portrait, class/level, AC, saves, passive
    Perception, languages — as a GM/player quick-reference; all fields already computed.
 
-10. **Loot valuation.** The wealth section already converts prices to gp; apply the same to the
-    session loot diff and show "≈ N gp gained this session" plus a per-character split.
+10. ✅ IMPLEMENTED (2026-07-11, `item_unit_gp()` / `_gp_summary_block()`) **Loot valuation.** The
+    wealth section already converts prices to gp; apply the same to the session loot diff and show
+    "≈ N gp gained this session" plus a per-character split.

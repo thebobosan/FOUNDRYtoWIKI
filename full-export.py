@@ -466,6 +466,25 @@ def _int(val, default: int = 0) -> int:
         return default
 
 
+_DENOM_TO_GP = {"pp": 10.0, "gp": 1.0, "sp": 0.1, "cp": 0.01}
+
+
+def item_unit_gp(item: dict) -> float:
+    """gp value of a single unit of this item (system.price.value / system.price.per).
+    Shared by the wealth section and the session loot valuation so both price
+    items the same way."""
+    s = item.get("system") or {}
+    praw = s.get("price") if isinstance(s, dict) else None
+    if not isinstance(praw, dict):
+        return 0.0
+    pval = praw.get("value") or {}
+    per  = _int(praw.get("per", 1) or 1)
+    if not isinstance(pval, dict) or per < 1:
+        return 0.0
+    total = sum(_DENOM_TO_GP[d] * _int(pval.get(d, 0)) for d in _DENOM_TO_GP if pval.get(d))
+    return total / per
+
+
 def collapsible(title: str, content: str, collapsed: bool = True) -> str:
     """
     Wrap content in a MediaWiki mw-collapsible div.
@@ -2626,7 +2645,6 @@ class FullExporter:
         coin_gp = cur["pp"] * 10 + cur["gp"] + cur["sp"] / 10 + cur["cp"] / 100
 
         # Sum item prices for all physical non-coin inventory items
-        DENOM_TO_GP = {"pp": 10.0, "gp": 1.0, "sp": 0.1, "cp": 0.01}
         PHYSICAL = {"weapon","armor","shield","consumable","ammo",
                     "equipment","treasure","backpack","kit"}
         item_gp = 0.0
@@ -2635,19 +2653,10 @@ class FullExporter:
                 continue
             if self._is_coin_item(item):
                 continue
-            s    = item.get("system") or {}
-            q    = s.get("quantity", 1) if isinstance(s, dict) else 1
-            qty  = _int(q["value"] if isinstance(q, dict) else q)
-            praw = s.get("price") if isinstance(s, dict) else None
-            if not isinstance(praw, dict):
-                continue
-            pval = praw.get("value") or {}
-            per  = _int(praw.get("per", 1) or 1)
-            if not isinstance(pval, dict) or per < 1:
-                continue
-            unit_gp = sum(DENOM_TO_GP[d] * _int(pval.get(d, 0))
-                          for d in DENOM_TO_GP if pval.get(d))
-            item_gp += unit_gp * qty / per
+            s   = item.get("system") or {}
+            q   = s.get("quantity", 1) if isinstance(s, dict) else 1
+            qty = _int(q["value"] if isinstance(q, dict) else q)
+            item_gp += item_unit_gp(item) * qty
 
         total_gp  = coin_gp + item_gp
         total_str = f"{total_gp:,.2f}".rstrip('0').rstrip('.') + " gp"
@@ -4044,6 +4053,7 @@ class SessionExporter:
                     "type": item.get("type", ""),
                     "qty":  qty,
                     "img":  item.get("img", ""),
+                    "unit_gp": item_unit_gp(item),
                 }
             snapshot[char["id"]] = {"name": char["name"], "items": items,
                                      "level": char.get("level"), "xp": char.get("xp")}
@@ -4094,31 +4104,40 @@ class SessionExporter:
             for item in char.get("items", []):
                 if item.get("type") not in PHYSICAL:
                     continue
-                iid  = item.get("_id", "")
-                isys = item.get("system") or {}
-                qty  = _int(isys.get("quantity", 1) if isinstance(isys, dict) else 1)
-                name = item.get("name", "Unknown")
-                img  = icon_url(item.get("img", ""), item.get("type", ""))
+                iid     = item.get("_id", "")
+                isys    = item.get("system") or {}
+                qty     = _int(isys.get("quantity", 1) if isinstance(isys, dict) else 1)
+                name    = item.get("name", "Unknown")
+                img     = icon_url(item.get("img", ""), item.get("type", ""))
+                unit_gp = item_unit_gp(item)
                 curr_ids.add(iid)
 
                 if iid not in prev_items:
                     gained.append({"char": char_name, "name": name, "qty": qty, "img": img,
-                                   "type": item.get("type", ""), "is_party": is_party})
+                                   "type": item.get("type", ""), "is_party": is_party,
+                                   "gp": unit_gp * qty})
                 else:
                     delta = qty - prev_items[iid].get("qty", qty)
                     if delta > 0:
                         gained.append({"char": char_name, "name": name, "qty": delta, "img": img,
-                                       "type": item.get("type", ""), "is_party": is_party})
+                                       "type": item.get("type", ""), "is_party": is_party,
+                                       "gp": unit_gp * delta})
                     elif delta < 0:
                         removed.append({"char": char_name, "name": name, "qty": -delta, "img": img,
-                                        "type": item.get("type", ""), "is_party": is_party})
+                                        "type": item.get("type", ""), "is_party": is_party,
+                                        "gp": unit_gp * -delta})
 
-            # Items in snapshot that are entirely gone from current inventory
+            # Items in snapshot that are entirely gone from current inventory —
+            # no current item data to price from, so use the unit price
+            # recorded in the snapshot itself (missing on pre-existing
+            # snapshots saved before this field was added, hence .get(...,0)).
             for iid, prev_item in prev_items.items():
                 if iid not in curr_ids:
+                    prev_qty = prev_item.get("qty", 1)
                     removed.append({"char": char_name, "name": prev_item.get("name", "Unknown"),
-                                    "qty": prev_item.get("qty", 1), "img": "", "type": "",
-                                    "is_party": is_party})
+                                    "qty": prev_qty, "img": "", "type": "",
+                                    "is_party": is_party,
+                                    "gp": prev_item.get("unit_gp", 0.0) * prev_qty})
 
         return gained, removed
 
@@ -4176,6 +4195,34 @@ class SessionExporter:
             })
 
         return sorted(results, key=lambda r: r["name"])
+
+    @staticmethod
+    def _fmt_gp(value: float) -> str:
+        return f"{value:,.2f}".rstrip('0').rstrip('.') + " gp"
+
+    def _gp_summary_block(self, entries: list, verb: str) -> list[str]:
+        """'≈ N gp {verb} this session' line plus a per-character gp split
+        table (only when more than one character is involved). Returns []
+        when nothing in `entries` carries a positive gp value."""
+        total = sum(e.get("gp", 0.0) for e in entries)
+        if total <= 0:
+            return []
+        per_char: dict[str, dict] = {}
+        for e in entries:
+            rec = per_char.setdefault(e["char"], {"gp": 0.0, "is_party": e.get("is_party", False)})
+            rec["gp"] += e.get("gp", 0.0)
+
+        lines = [f"''≈ {self._fmt_gp(total)} {verb} this session.''", ""]
+        if len(per_char) > 1:
+            lines.append('{| class="wikitable sortable"')
+            lines.append("! Character !! gp")
+            for name, rec in sorted(per_char.items(), key=lambda kv: -kv[1]["gp"]):
+                name_esc = wiki_escape(name)
+                label = name_esc if rec["is_party"] else f"[[Characters/{name_esc}|{name_esc}]]"
+                lines += ["|-", f"| {label} || {self._fmt_gp(rec['gp'])}"]
+            lines.append("|}")
+            lines.append("")
+        return lines
 
     def render_session_page(self, date_str: str, session_data: dict,
                             loot: list, start: datetime, end: datetime,
@@ -4300,14 +4347,16 @@ class SessionExporter:
 
         lines.append("== Loot Gained ==")
         if loot:
+            lines += self._gp_summary_block(loot, "gained")
             lines.append('{| class="wikitable sortable" style="width:100%;"')
-            lines.append("! !! Item !! Qty !! Character")
+            lines.append("! !! Item !! Qty !! Character !! gp")
             for entry in sorted(loot, key=lambda x: (x["char"], x["name"])):
                 icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
+                gp_s   = self._fmt_gp(entry["gp"]) if entry.get("gp") else "—"
                 lines += [
                     "|-",
                     f"| {icon_s} || {wiki_escape(entry['name'])} || {entry['qty']} "
-                    f"|| {_char_cell(entry)}",
+                    f"|| {_char_cell(entry)} || {gp_s}",
                 ]
             lines.append("|}")
         else:
@@ -4316,14 +4365,16 @@ class SessionExporter:
 
         if removed:
             lines.append("== Items Spent / Removed ==")
+            lines += self._gp_summary_block(removed, "lost")
             lines.append('{| class="wikitable sortable" style="width:100%;"')
-            lines.append("! !! Item !! Qty !! Character")
+            lines.append("! !! Item !! Qty !! Character !! gp")
             for entry in sorted(removed, key=lambda x: (x["char"], x["name"])):
                 icon_s = wiki_img(entry["img"], 24, entry["name"]) if entry.get("img") else ""
+                gp_s   = self._fmt_gp(entry["gp"]) if entry.get("gp") else "—"
                 lines += [
                     "|-",
                     f"| {icon_s} || {wiki_escape(entry['name'])} || {entry['qty']} "
-                    f"|| {_char_cell(entry)}",
+                    f"|| {_char_cell(entry)} || {gp_s}",
                 ]
             lines.append("|}")
             lines.append("")
