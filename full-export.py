@@ -1628,7 +1628,8 @@ class FullExporter:
 
         Returns dict mapping short keys → effective rank int, e.g.:
           "saves.fortitude" → 2, "skills.athletics" → 1, "perception" → 1,
-          "attacks.martial" → 2 (Weapon Expertise), "attacks.weapon-base-staff" → 2
+          "attacks.martial" → 2 (Weapon Expertise), "attacks.weapon-base-staff" → 2,
+          "spellcasting" → 2 (e.g. Ranger's Warden Spellcasting, Monk's Qi Spells)
         """
         _SKILL_SLUGS = (
             "acrobatics","arcana","athletics","crafting","deception",
@@ -1644,6 +1645,7 @@ class FullExporter:
             "system.proficiencies.defenses.light.rank":     "defenses.light",
             "system.proficiencies.defenses.medium.rank":    "defenses.medium",
             "system.proficiencies.defenses.heavy.rank":     "defenses.heavy",
+            "system.proficiencies.spellcasting.rank":        "spellcasting",
             **{f"system.skills.{s}.rank": f"skills.{s}" for s in _SKILL_SLUGS},
         }
         ranks: dict[str, int] = {}
@@ -2014,6 +2016,59 @@ class FullExporter:
         if base_item:
             rank = max(rank, rr.get(f"attacks.weapon-base-{base_item}", 0))
         return rank
+
+    _SPELLCASTER_RANK_FEATURES = {
+        "expert spellcaster": 2, "master spellcaster": 3, "legendary spellcaster": 4,
+    }
+
+    def _spellcasting_rank(self, entry_system: dict, items: list,
+                            rules_ranks: dict = None) -> int:
+        """
+        Proficiency rank for a spellcasting entry:
+          1. entry.system.proficiency.value — the entry's own stored
+             baseline (present on every entry; normally 1/Trained).
+          2. Rules-based upgrades (system.proficiencies.spellcasting.rank
+             ActiveEffectLike, e.g. Ranger's Warden Spellcasting, Monk's Qi
+             Spells) via the "spellcasting" key _rules_ranks extracts.
+          3. Presence of the generic "Expert/Master/Legendary Spellcaster"
+             class-feature items — these are attached to the actor's own
+             item list once the level threshold granting them is reached
+             (the standard Foundry level-up flow adds them directly, so
+             their mere presence on this actor is a reliable signal,
+             without needing to re-check the actor's level here).
+        Known gap: Cleric's rank progression (and any other class lacking
+        these generically-named items) is hardcoded in the PF2e system
+        engine rather than granted via a compendium item, so it isn't
+        reconstructable from stored data — such characters understate rank
+        at level 7+ until a rules-based or stored signal (1/2 above) says
+        otherwise. Narrow, documented gap rather than a guess.
+        """
+        rank = _int((entry_system.get("proficiency") or {}).get("value", 0))
+        rr = rules_ranks or {}
+        rank = max(rank, rr.get("spellcasting", 0))
+        for item in items:
+            if item.get("type") != "class-feature":
+                continue
+            bump = self._SPELLCASTER_RANK_FEATURES.get((item.get("name") or "").strip().lower())
+            if bump:
+                rank = max(rank, bump)
+        return rank or 1  # every spellcasting entry is at least Trained
+
+    def _spell_dc_attack(self, entry_system: dict, abilities: dict, level: int,
+                          items: list, rules_ranks: dict = None) -> tuple[int, int]:
+        """
+        Reconstruct (dc, attack) for a spellcasting entry when Foundry hasn't
+        persisted them (spelldc.dc/.value are derived client-side and often
+        stored as 0). Same key-ability + level + proficiency-rank shape as
+        saves/perception: attack = ability mod + (level + rank*2 if trained),
+        dc = 10 + attack.
+        """
+        ability_slug = (entry_system.get("ability") or {}).get("value") or ""
+        ability_mod  = abilities.get(ability_slug, 0)
+        rank         = self._spellcasting_rank(entry_system, items, rules_ranks)
+        prof_bonus   = (level + rank * 2) if rank > 0 else 0
+        attack       = ability_mod + prof_bonus
+        return 10 + attack, attack
 
     # ── Math engine ───────────────────────────────────────────────────────
 
@@ -2573,8 +2628,10 @@ class FullExporter:
                 trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
                 ctype    = isys.get("prepared",  {}).get("value", "") if isinstance(isys.get("prepared"),  dict) else ""
                 dc_node  = isys.get("spelldc") or {}
-                dc       = dc_node.get("dc")    if isinstance(dc_node, dict) else None
-                atk      = dc_node.get("value") if isinstance(dc_node, dict) else None
+                dc       = _int(dc_node.get("dc"))    if isinstance(dc_node, dict) else 0
+                atk      = _int(dc_node.get("value")) if isinstance(dc_node, dict) else 0
+                if not dc and not atk:
+                    dc, atk = self._spell_dc_attack(isys, abilities, level, items, rules_ranks)
                 slots    = {}
                 for slot_key, slot_data in (isys.get("slots") or {}).items():
                     if isinstance(slot_data, dict):

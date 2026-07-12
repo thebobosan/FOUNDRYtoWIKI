@@ -138,9 +138,29 @@ ideas from there.)
    the weapon's own fields. Only "readied" weapons (`carryType` held/worn) are shown; per user
    decision, no synthesized default Unarmed Strike is added when a PC has no weapon items.
 
-2. **Computed spell DC / attack.** `spelldc.dc` is often absent on PC spellcasting entries, so the
-   Spellcasting section shows no DC. Reconstruct from key ability + level + a spellcasting
-   proficiency rank cascade, same pattern as saves.
+2. ✅ IMPLEMENTED (2026-07-11, `_spellcasting_rank()` / `_spell_dc_attack()`)
+   **Computed spell DC / attack.** `spelldc.dc` is often absent on PC spellcasting entries, so the
+   Spellcasting section shows no DC. Reconstructed from key ability + level + a spellcasting
+   proficiency rank cascade, same shape as `_save_rank`: `attack = ability mod + (level + rank*2)`,
+   `dc = 10 + attack`. Only kicks in when the stored `spelldc.dc`/`.value` are both falsy (0), so a
+   legitimately precomputed value — e.g. on NPC-authored entries — is never overwritten.
+   Proficiency rank itself cascades: (1) the entry's own stored `system.proficiency.value` baseline
+   (present on every entry, normally 1/Trained); (2) rules-based upgrades via the newly-generalized
+   `system.proficiencies.spellcasting.rank` ActiveEffectLike path (e.g. Ranger's Warden
+   Spellcasting, Monk's Qi Spells), added to `_rules_ranks()`'s `PATH_MAP` alongside the existing
+   saves/skills/defenses/attacks keys; (3) presence of the generic "Expert/Master/Legendary
+   Spellcaster" class-feature items, which Foundry's standard level-up flow attaches directly to
+   the actor's item list once the granting level is reached — so their mere presence on this actor
+   is a reliable per-character signal without needing to re-derive it from level thresholds.
+   Verified against real fixture data (Wizard/Bard/Sorcerer/Druid/Psychic/Witch/Oracle/Magus/
+   Summoner class items in the compendium all grant these three generically-named features at
+   their respective thresholds) and against hand-calculated DC/attack for 5 level-1/2 fixture PCs.
+   Known gap, documented in code: Cleric's rank progression is hardcoded in the PF2e system engine
+   rather than granted via a compendium item of this name, so Clerics (and any other class missing
+   these items, with no rules-based signal either) understate rank at level 7+ — same "least-bad
+   heuristic" tradeoff as the rest of the math engine. Scoped to PCs only, per the suggestion text;
+   `_parse_npc`'s spellcasting parsing is untouched since NPC stat blocks are authored directly
+   (rarely 0) and aren't rendered on the player-facing wiki anyway.
 
 3. ✅ IMPLEMENTED (2026-07-11, `session_index.json` / `_session_nav_line` / `render_sessions_index_page`)
    **Session navigation + auto index.** Add `← previous | next →` links between `Sessions/YYYYMMDD`
