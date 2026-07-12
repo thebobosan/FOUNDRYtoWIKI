@@ -150,9 +150,13 @@ ideas from there.)
    content; the HTML→wikitext converter already exists. Exporting journals (with a folder-based
    include/exclude convention for GM-only entries) would populate the wiki's actual lore pages.
 
-7. **NPC "Appearances" section.** Session data already knows which NPC tokens appeared in which
+7. ✅ IMPLEMENTED (2026-07-11, `npc_appearances.json` / `SessionExporter.run` / `render_npc_page`)
+   **NPC "Appearances" section.** Session data already knows which NPC tokens appeared in which
    window — list "Seen in: [[Sessions/20260630]], …" on each NPC page. Player-safe (no stats) and
-   makes NPC pages useful as campaign memory.
+   makes NPC pages useful as campaign memory. Keyed by actor id (same as `combat_record()`), so
+   inherits the same known limitation as kill/downing attribution: a base Actor reused as a
+   template for a different monster later (see CLAUDE.md) will show that monster's earlier
+   appearances too.
 
 8. **Session preview mode.** `--session` without `--push` currently just prints a note. Rendering
    `wiki_preview/Session_YYYYMMDD.wiki` (skipping the snapshot save so it stays side-effect-free)

@@ -719,6 +719,7 @@ class FullExporter:
         self._combat_record = None
         self._raw_msgs_cache = None
         self._campaign_stats_cache = None
+        self._npc_appearances_cache = None
 
     # ── Wiki page name tracking (renames) ───────────────────────────────────
 
@@ -745,6 +746,23 @@ class FullExporter:
     def _save_page_names(self, page_names: dict):
         self._PAGE_NAMES_PATH.parent.mkdir(exist_ok=True)
         self._PAGE_NAMES_PATH.write_text(json.dumps(page_names, indent=2), encoding="utf-8")
+
+    # ── NPC appearances (written by SessionExporter.run) ────────────────────
+
+    _NPC_APPEARANCES_PATH = Path("session_snapshots") / "npc_appearances.json"
+
+    def _load_npc_appearances(self) -> dict:
+        """{"<actor_id>": {"20260630": "June 30, 2026", ...}}, cached after
+        first read since render_npc_page may be called once per NPC."""
+        if self._npc_appearances_cache is None:
+            try:
+                self._npc_appearances_cache = (
+                    json.loads(self._NPC_APPEARANCES_PATH.read_text(encoding="utf-8"))
+                    if self._NPC_APPEARANCES_PATH.exists() else {}
+                )
+            except Exception:
+                self._npc_appearances_cache = {}
+        return self._npc_appearances_cache
 
     # ── Combat record (last kill / last knocked unconscious) ───────────────
 
@@ -3138,6 +3156,18 @@ class FullExporter:
         if npc.get("pub_notes"):
             lines += ["== Description ==", npc["pub_notes"], ""]
 
+        # Session dates this NPC's token showed up in — player-safe (no
+        # stats), makes the page useful as campaign memory. Empty/missing
+        # when npc_appearances.json hasn't been built yet (no --session run)
+        # or this NPC has never appeared in a tracked session.
+        appearances = self._load_npc_appearances().get(npc["id"], {})
+        if appearances:
+            seen_links = ", ".join(
+                f"[[Sessions/{date_str}|{wiki_escape(label)}]]"
+                for date_str, label in sorted(appearances.items())
+            )
+            lines += ["== Appearances ==", f"''Seen in:'' {seen_links}", ""]
+
         # GM notes (private)
         if npc.get("priv_notes"):
             lines.append(collapsible("GM Notes (Private)", npc["priv_notes"]))
@@ -4418,6 +4448,32 @@ class SessionExporter:
         self._session_index_path().write_text(
             json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
 
+    # ── NPC appearances ──────────────────────────────────────────────────
+    #
+    # {"<actor_id>": {"20260630": "June 30, 2026", ...}}  — one entry per
+    # session date an NPC's token showed up in, keyed by actor id (same
+    # keying as combat_record()/enemies_encountered — see CLAUDE.md's note
+    # on base Actors being reused as templates across unrelated encounters;
+    # a renamed/reused actor's "Seen in" list inherits the same limitation
+    # as its kill/downing attribution). Read by FullExporter.render_npc_page
+    # via _NPC_APPEARANCES_PATH to render each NPC's "Appearances" section.
+
+    def _npc_appearances_path(self) -> Path:
+        return self.SNAPSHOT_DIR / "npc_appearances.json"
+
+    def _load_npc_appearances(self) -> dict:
+        p = self._npc_appearances_path()
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_npc_appearances(self, appearances: dict):
+        self._npc_appearances_path().write_text(
+            json.dumps(appearances, indent=2, sort_keys=True), encoding="utf-8")
+
     @staticmethod
     def _parse_session_page_metadata(text: str, date_str: str) -> dict | None:
         """Reconstruct a session_index entry from a rendered session page's
@@ -4705,6 +4761,13 @@ class SessionExporter:
             "characters_present": session_data["characters_present"],
         }
         nav = self._session_nav_line(date_str, index)
+
+        # Record which NPCs' tokens showed up this session, keyed by actor id
+        # (see the class-level comment above _npc_appearances_path).
+        npc_appearances = self._load_npc_appearances()
+        for enemy in session_data["enemies_encountered"]:
+            npc_appearances.setdefault(enemy["id"], {})[date_str] = index[date_str]["label"]
+        self._save_npc_appearances(npc_appearances)
 
         markup     = self.render_session_page(date_str, session_data, loot, start, end, removed,
                                               ingame_date, xp_data, combat_stats, nav)
