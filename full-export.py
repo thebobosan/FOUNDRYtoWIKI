@@ -4182,11 +4182,14 @@ class SessionExporter:
                             removed: list = None,
                             ingame_date: str = None,
                             xp_data: list = None,
-                            combat_stats: dict = None) -> str:
+                            combat_stats: dict = None,
+                            nav: str = "") -> str:
         lines = [
             f"= Session: {start.strftime('%B %d, %Y')} =",
             "",
         ]
+        if nav:
+            lines += [f"''{nav}''", ""]
         if ingame_date:
             lines += [f"'''In-game date:''' {ingame_date}", ""]
         lines += [
@@ -4336,6 +4339,188 @@ class SessionExporter:
     def _comparable(markup: str) -> str:
         return re.sub(r"^''Generated:.*?''\n?", "", markup, flags=re.MULTILINE).strip()
 
+    # ── Session index / prev-next navigation ────────────────────────────
+    #
+    # session_index.json (session_snapshots/) caches, per session date,
+    # just enough metadata (label, in-game date, encounter count,
+    # characters present) to render both the "Sessions" index page and
+    # every page's "← previous | next →" nav line without re-running the
+    # full loot/XP/combat-stats computation for historical dates. Entries
+    # are added whenever this run pushes a session page, and backfilled by
+    # parsing already-existing wiki pages the first time a date is missing
+    # (see _bootstrap_session_index) — covers pages created before this
+    # cache existed, or on a machine without the local snapshot history.
+
+    def _session_index_path(self) -> Path:
+        return self.SNAPSHOT_DIR / "session_index.json"
+
+    def _load_session_index(self) -> dict:
+        p = self._session_index_path()
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_session_index(self, index: dict):
+        self._session_index_path().write_text(
+            json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+
+    @staticmethod
+    def _parse_session_page_metadata(text: str, date_str: str) -> dict | None:
+        """Reconstruct a session_index entry from a rendered session page's
+        markup. Used to backfill dates that predate the local index cache."""
+        if not text:
+            return None
+        title_m = re.search(r"^= Session: (.+?) =", text, re.MULTILINE)
+        label = title_m.group(1) if title_m else date_str
+        ingame_m = re.search(r"^'''In-game date:''' (.+)$", text, re.MULTILINE)
+        ingame_date = ingame_m.group(1).strip() if ingame_m else None
+        enc_m = re.search(r"Encounters: (\d+)", text)
+        num_combats = int(enc_m.group(1)) if enc_m else 0
+        chars = re.findall(r"^\* \[\[Characters/[^|]+\|(.+?)\]\]$", text, re.MULTILINE)
+        return {"label": label, "ingame_date": ingame_date,
+                "num_combats": num_combats, "characters_present": chars}
+
+    def _bootstrap_session_index(self, site, index: dict) -> dict:
+        """Backfill index entries for Sessions/* pages that already exist on
+        the wiki but aren't in the local cache, by listing them via the
+        wiki API and parsing their markup. Keeps the index (and therefore
+        the "Sessions" index page and nav links) complete even across a
+        fresh checkout or a pruned/missing session_snapshots/ directory."""
+        try:
+            wiki_pages = list(site.allpages(prefix="Sessions/"))
+        except Exception as e:
+            print(f"  ⚠  Could not list existing Sessions pages: {e}")
+            return index
+        for p in wiki_pages:
+            name = getattr(p, "name", "") or ""
+            date_str = name.split("/", 1)[1] if "/" in name else ""
+            if not date_str or not date_str.isdigit() or date_str in index:
+                continue
+            entry = self._parse_session_page_metadata(p.text(), date_str)
+            if entry:
+                index[date_str] = entry
+                print(f"  ↪  Indexed existing page: {name}")
+        return index
+
+    @staticmethod
+    def _session_nav_line(date_str: str, index: dict) -> str:
+        """'← prev label | next label →' for date_str, given the full index."""
+        dates = sorted(index.keys())
+        if date_str not in dates:
+            return ""
+        i = dates.index(date_str)
+        parts = []
+        if i > 0:
+            p = dates[i - 1]
+            parts.append(f"[[Sessions/{p}|← {index[p].get('label', p)}]]")
+        if i < len(dates) - 1:
+            n = dates[i + 1]
+            parts.append(f"[[Sessions/{n}|{index[n].get('label', n)} →]]")
+        return " | ".join(parts)
+
+    @staticmethod
+    def _replace_nav_line(markup: str, new_nav: str) -> str:
+        """Insert/replace/remove the nav line (the line right after the
+        '= Session: ... =' title, identified by containing a '[[Sessions/'
+        link) without touching the rest of the page — used to patch a
+        neighboring session page's nav when this run adds/moves an
+        adjacent date, without re-running that page's full render."""
+        lines = markup.split("\n")
+        title_idx = next((i for i, l in enumerate(lines) if l.startswith("= Session:")), None)
+        if title_idx is None:
+            return markup
+        insert_idx = title_idx + 1
+        if insert_idx < len(lines) and lines[insert_idx] == "":
+            insert_idx += 1
+        has_nav = insert_idx < len(lines) and "[[Sessions/" in lines[insert_idx]
+        if has_nav:
+            if new_nav:
+                lines[insert_idx] = f"''{new_nav}''"
+            else:
+                del lines[insert_idx]
+                if insert_idx < len(lines) and lines[insert_idx] == "":
+                    del lines[insert_idx]
+        elif new_nav:
+            lines[insert_idx:insert_idx] = [f"''{new_nav}''", ""]
+        return "\n".join(lines)
+
+    def _sync_neighbor_nav(self, site, index: dict, date_str: str):
+        """After date_str's own page is pushed with a correct nav line,
+        patch the immediately adjacent date(s)' pages so their nav stays
+        correct too (a newly-pushed page's predecessor needs its '→ next'
+        link added; a historical --session-date rebuild inserted into a
+        gap needs both neighbors updated)."""
+        dates = sorted(index.keys())
+        i = dates.index(date_str)
+        neighbors = [d for d in (dates[i - 1] if i > 0 else None,
+                                  dates[i + 1] if i < len(dates) - 1 else None) if d]
+        for other_date in neighbors:
+            title   = f"Sessions/{other_date}"
+            page    = site.pages[title]
+            current = page.text()
+            if not current:
+                continue
+            new_nav = self._session_nav_line(other_date, index)
+            patched = self._replace_nav_line(current, new_nav)
+            if self._comparable(patched) != self._comparable(current):
+                page.edit(patched, summary="Auto-sync: update session nav links.")
+                print(f"  ↪  Updated nav links: {title}")
+
+    def render_sessions_index_page(self, index: dict) -> str:
+        """Render the 'Sessions' index page: one row per session date, newest
+        first, linking to each Sessions/YYYYMMDD page."""
+        lines = [
+            "= Sessions =",
+            "",
+            "''Auto-generated index of all session logs.''",
+            "",
+            '{| class="wikitable sortable" style="width:100%;"',
+            "! Date !! In-game Date !! Encounters !! Characters Present",
+        ]
+        for date_str in sorted(index.keys(), reverse=True):
+            entry    = index[date_str]
+            label    = entry.get("label", date_str)
+            ingame   = entry.get("ingame_date") or "—"
+            n_combat = entry.get("num_combats", 0)
+            chars    = entry.get("characters_present") or []
+            chars_s  = (", ".join(f"[[Characters/{wiki_escape(c)}|{wiki_escape(c)}]]" for c in chars)
+                        if chars else "—")
+            lines += [
+                "|-",
+                f"| [[Sessions/{date_str}|{wiki_escape(label)}]] || {wiki_escape(ingame)} "
+                f"|| {n_combat} || {chars_s}",
+            ]
+        lines.append("|}")
+        lines += [
+            "",
+            f"''Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Sessions]]",
+        ]
+        return "\n".join(lines)
+
+    def push_sessions_index(self, site, index: dict = None):
+        """Regenerate and push the 'Sessions' index page. Bootstraps any
+        pre-existing wiki pages missing from the local index first."""
+        if index is None:
+            index = self._load_session_index()
+        index = self._bootstrap_session_index(site, index)
+        if not index:
+            print("  ⚠  No session pages found — skipping Sessions index.")
+            return
+        self._save_session_index(index)
+
+        new_markup     = self.render_sessions_index_page(index)
+        page           = site.pages["Sessions"]
+        current_markup = page.text()
+        if current_markup and self._comparable(current_markup) == self._comparable(new_markup):
+            print("  –  Skipped (no changes): Sessions index")
+            return
+        page.edit(new_markup, summary="Auto-sync: regenerate Sessions index.")
+        print(f"✓  {'Created' if not current_markup else 'Updated'}: Sessions index")
+
     def run(self, site, all_chars: list, start_date: datetime = None):
         start, end = self.session_window(start_date)
         date_str   = start.strftime("%Y%m%d")
@@ -4405,8 +4590,22 @@ class SessionExporter:
         if ingame_date:
             print(f"  In-game date:       {ingame_date}")
 
+        # Build/update this date's session_index entry before rendering, so
+        # the nav line and the "Sessions" index page both see it. A rebuild
+        # doesn't recompute the in-game date (see comment above) — keep
+        # whatever was already indexed for this date rather than blanking it.
+        index     = self._load_session_index()
+        old_entry = index.get(date_str)
+        index[date_str] = {
+            "label": start.strftime("%B %d, %Y"),
+            "ingame_date": ingame_date or (old_entry.get("ingame_date") if old_entry else None),
+            "num_combats": session_data["num_combats"],
+            "characters_present": session_data["characters_present"],
+        }
+        nav = self._session_nav_line(date_str, index)
+
         markup     = self.render_session_page(date_str, session_data, loot, start, end, removed,
-                                              ingame_date, xp_data, combat_stats)
+                                              ingame_date, xp_data, combat_stats, nav)
         page_title = f"Sessions/{date_str}"
         page       = site.pages[page_title]
         current    = page.text()
@@ -4426,6 +4625,13 @@ class SessionExporter:
             # Save snapshot for next run's diff, now that the push succeeded
             # (or the page was already up to date).
             self._save_snapshot(inventory_entities, date_str)
+
+        # Keep neighboring pages' nav links correct, then regenerate the
+        # Sessions index page (also backfills any pre-existing pages this
+        # local index doesn't know about yet).
+        self._save_session_index(index)
+        self._sync_neighbor_nav(site, index, date_str)
+        self.push_sessions_index(site, index)
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -128,7 +128,8 @@ ideas from there.)
    Spellcasting section shows no DC. Reconstruct from key ability + level + a spellcasting
    proficiency rank cascade, same pattern as saves.
 
-3. **Session navigation + auto index.** Add `← previous | next →` links between `Sessions/YYYYMMDD`
+3. ✅ IMPLEMENTED (2026-07-11, `session_index.json` / `_session_nav_line` / `render_sessions_index_page`)
+   **Session navigation + auto index.** Add `← previous | next →` links between `Sessions/YYYYMMDD`
    pages (the dated snapshots already enumerate session dates) and regenerate a `Sessions` index
    page with date, in-game date, encounter count, and characters present.
 
