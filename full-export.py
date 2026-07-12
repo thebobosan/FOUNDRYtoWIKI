@@ -3250,6 +3250,41 @@ class FullExporter:
         ]
         return "\n".join(lines)
 
+    def render_party_overview_page(self, chars: list) -> str:
+        """Render the 'Party Overview' page: one row per PC (portrait, class/level,
+        HP, AC, saves, Perception, languages) as a GM/player quick-reference.
+        All fields are already computed by _parse_character — no new stat math."""
+        lines = [
+            "= Party Overview =",
+            "",
+            '{| class="wikitable sortable" style="width:100%;"',
+            "! Portrait !! Character !! Class !! Level !! HP !! AC !! Fort !! Ref !! Will "
+            "!! Perception !! Languages",
+        ]
+        for char in sorted(chars, key=lambda c: c.get("name") or ""):
+            portrait_img = wiki_img(char["portrait"], 40, char["name"]) if char.get("portrait") else ""
+            class_item   = next((i for i in char["items"] if i.get("type") == "class"), None)
+            class_name   = wiki_escape(class_item["name"]) if class_item else "—"
+            hp_str       = f"{char['hp']}/{char['hp_max']}"
+            langs        = ", ".join(str(l) for l in char["languages"]) if char.get("languages") else "—"
+            lines += [
+                "|-",
+                f"| {portrait_img} || [[Characters/{wiki_escape(char['name'])}|{wiki_escape(char['name'])}]] "
+                f"|| {class_name} || {char['level']} || {hp_str} || {char['ac']} "
+                f"|| {self._fmt_save(char['fortitude'], char['fortitude_rank'])} "
+                f"|| {self._fmt_save(char['reflex'], char['reflex_rank'])} "
+                f"|| {self._fmt_save(char['will'], char['will_rank'])} "
+                f"|| {fmt_mod(char['perception'])} ({self._fmt_prof(char['perception_rank'])}) "
+                f"|| {langs}",
+            ]
+        lines.append("|}")
+        lines += [
+            "",
+            f"''Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M')}''",
+            "[[Category:Party Overview]]",
+        ]
+        return "\n".join(lines)
+
     def render_campaign_stats_page(self) -> str:
         """
         Render the cumulative 'Campaign Stats' page: a per-PC leaderboard
@@ -3446,6 +3481,24 @@ class FullExporter:
         page.edit(new_markup, summary="Auto-sync: PF2e party stash exporter.")
         print(f"✓  {'Created' if not current_markup else 'Updated'}: Party Stash")
 
+    def push_party_overview(self, site):
+        """Push the Party Overview page. Accepts a shared mwclient.Site instance."""
+        chars = self.get_all_characters()
+        if not chars:
+            print("  ⚠  No characters found — skipping party overview page.")
+            return
+
+        new_markup     = self.render_party_overview_page(chars)
+        page           = site.pages["Party Overview"]
+        current_markup = page.text()
+
+        if current_markup and self._comparable(current_markup) == self._comparable(new_markup):
+            print("  –  Skipped (no changes): Party Overview")
+            return
+
+        page.edit(new_markup, summary="Auto-sync: PF2e party overview exporter.")
+        print(f"✓  {'Created' if not current_markup else 'Updated'}: Party Overview")
+
     def push_campaign_stats(self, site):
         """Push the cumulative campaign stats page. Accepts a shared mwclient.Site."""
         new_markup     = self.render_campaign_stats_page()
@@ -3484,6 +3537,17 @@ class FullExporter:
         out_dir.mkdir(exist_ok=True)
         filename = out_dir / "Party_Stash.wiki"
         filename.write_text(self.render_party_stash_page(parties), encoding="utf-8")
+        print(f"✓  Preview written: {filename}")
+
+    def preview_party_overview(self):
+        chars = self.get_all_characters()
+        if not chars:
+            print("  ⚠  No characters found.")
+            return
+        out_dir  = Path("wiki_preview")
+        out_dir.mkdir(exist_ok=True)
+        filename = out_dir / "Party_Overview.wiki"
+        filename.write_text(self.render_party_overview_page(chars), encoding="utf-8")
         print(f"✓  Preview written: {filename}")
 
     def preview_campaign_stats(self):
@@ -4385,6 +4449,7 @@ Examples:
   Push PCs + session:             python full-exporter.py --push --session
   Push PCs + NPCs + session:      python full-exporter.py --push --npcs --session
   Push campaign stats page:       python full-exporter.py --push --stats
+  Push party overview page:       python full-exporter.py --push --overview
   Debug raw data:                 python full-exporter.py --char "Name" --debug
 """)
     parser.add_argument("--push",          action="store_true",
@@ -4397,6 +4462,8 @@ Examples:
                         help="Include the party stash export in this run")
     parser.add_argument("--stats",         action="store_true",
                         help="Include the cumulative campaign stats page in this run")
+    parser.add_argument("--overview",      action="store_true",
+                        help="Include the Party Overview quick-reference page in this run")
     parser.add_argument("--session",       action="store_true",
                         help="Build and push today's session log (4am window)")
     parser.add_argument("--session-date",  metavar="YYYY-MM-DD",
@@ -4445,6 +4512,11 @@ Examples:
                 print("\n── Campaign Stats ──────────────────────────────────")
                 exporter.push_campaign_stats(site)
 
+            # Optionally push the party overview quick-reference page
+            if args.overview:
+                print("\n── Party Overview ──────────────────────────────────")
+                exporter.push_party_overview(site)
+
             # Optionally push session log
             if args.session:
                 session_start = None
@@ -4467,6 +4539,8 @@ Examples:
                 exporter.preview_party_stash()
             if args.stats:
                 exporter.preview_campaign_stats()
+            if args.overview:
+                exporter.preview_party_overview()
 
     finally:
         exporter.close()
