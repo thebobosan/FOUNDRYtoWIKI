@@ -7,11 +7,11 @@ enriches items from system compendium packs, resolves Foundry icon URLs,
 and pushes formatted pages to MediaWiki.
 
 Usage:
-    python full-exporter.py                          # Preview all PCs
-    python full-exporter.py --push                   # Push all PCs to wiki
-    python full-exporter.py --char "Name"            # Preview one character
-    python full-exporter.py --char "Name" --push     # Push one character
-    python full-exporter.py --char "Name" --debug    # Dump raw system data
+    python full-export.py                          # Preview all PCs
+    python full-export.py --push                   # Push all PCs to wiki
+    python full-export.py --char "Name"            # Preview one character
+    python full-export.py --char "Name" --push     # Push one character
+    python full-export.py --char "Name" --debug    # Dump raw system data
 """
 
 import plyvel
@@ -36,6 +36,11 @@ from html.parser import HTMLParser
 WORLD_PATH   = "/var/www/java/foundry.atkennedy.com/foundrydata/Data/worlds/temporary-title/"
 FOUNDRY_DATA = "/var/www/java/foundry.atkennedy.com/foundrydata/Data"
 FOUNDRY_URL  = "https://foundry.atkennedy.com"
+
+# All persistent state (snapshots, page-name tracking, caches, previews) is
+# anchored here rather than the CWD — a cron job or absolute-path invocation
+# from another directory must not silently fork a fresh empty state tree.
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 def _read_wiki_password() -> str | None:
     """
@@ -76,6 +81,10 @@ DEFAULT_ICONS = {
     "shield":     "systems/pf2e/icons/default-icons/shield.svg",
     "equipment":  "systems/pf2e/icons/default-icons/equipment.svg",
     "consumable": "systems/pf2e/icons/default-icons/consumable.svg",
+    # pf2e ships no dedicated default for ammo/kit — reuse the closest ones
+    # so these item types get *an* icon instead of none.
+    "ammo":       "systems/pf2e/icons/default-icons/consumable.svg",
+    "kit":        "systems/pf2e/icons/default-icons/equipment.svg",
     "backpack":   "systems/pf2e/icons/default-icons/backpack.svg",
     "treasure":   "systems/pf2e/icons/default-icons/treasure.svg",
     "feat":       "systems/pf2e/icons/default-icons/feat.svg",
@@ -138,7 +147,9 @@ def wiki_img(url: str, size: int = 20, alt: str = "") -> str:
         return ""
     alt_attr = html.escape(alt, quote=True) if alt else ""
     url_attr = html.escape(url, quote=True)
-    return (f'<html><img src="{url_attr}" width="{size}" height="{size}" '
+    # Width only — forcing height too would distort non-square images
+    # (e.g. portrait art in the Party Overview table).
+    return (f'<html><img src="{url_attr}" width="{size}" '
             f'alt="{alt_attr}" style="vertical-align:middle;" /></html>')
 
 
@@ -352,7 +363,9 @@ def html_to_wikitext(text) -> str:
         def __init__(self):
             super().__init__()
             self.out        = []
-            self.list_depth = 0
+            # Stack of wikitext list markers ("*" for ul, "#" for ol) so
+            # nested and mixed lists emit the right prefix, e.g. "*#".
+            self.list_stack = []
 
         def handle_starttag(self, tag, attrs):
             if tag == "p":
@@ -360,10 +373,19 @@ def html_to_wikitext(text) -> str:
                     self.out.append("\n\n")
             elif tag == "br":
                 self.out.append("<br />\n")
-            elif tag in ("ul", "ol"):
-                self.list_depth += 1
+            elif tag == "ul":
+                self.list_stack.append("*")
+            elif tag == "ol":
+                self.list_stack.append("#")
             elif tag == "li":
-                self.out.append("\n" + "*" * self.list_depth + " ")
+                self.out.append("\n" + ("".join(self.list_stack) or "*") + " ")
+            elif tag == "tr":
+                # Minimal table handling: keep each row on its own line and
+                # cells space-separated, instead of collapsing the whole
+                # table into run-on text.
+                self.out.append("\n")
+            elif tag in ("td", "th"):
+                self.out.append(" ")
             elif tag in ("strong", "b"):
                 self.out.append("'''")
             elif tag in ("em", "i"):
@@ -381,8 +403,9 @@ def html_to_wikitext(text) -> str:
             if tag == "p":
                 self.out.append("\n\n")
             elif tag in ("ul", "ol"):
-                self.list_depth = max(0, self.list_depth - 1)
-                if self.list_depth == 0:
+                if self.list_stack:
+                    self.list_stack.pop()
+                if not self.list_stack:
                     self.out.append("\n")
             elif tag in ("strong", "b"):
                 self.out.append("'''")
@@ -519,7 +542,7 @@ def make_site() -> mwclient.Site:
 # Compendium index
 # ════════════════════════════════════════════════════════════════════════════
 
-_COMP_CACHE_PATH = Path("session_snapshots/compendium_cache.json")
+_COMP_CACHE_PATH = SCRIPT_DIR / "session_snapshots" / "compendium_cache.json"
 
 def build_compendium_index(data_root: str) -> dict:
     index = {}
@@ -549,7 +572,11 @@ def build_compendium_index(data_root: str) -> dict:
     if _COMP_CACHE_PATH.exists():
         try:
             cached = json.loads(_COMP_CACHE_PATH.read_text(encoding="utf-8"))
-            if cached.get("mtime", 0) >= max_mtime:
+            # The pack list must match too — adding a pack to
+            # COMPENDIUM_PACKS doesn't change any existing pack's mtime,
+            # so an mtime-only check would keep serving the old index.
+            if (cached.get("mtime", 0) >= max_mtime
+                    and cached.get("packs") == COMPENDIUM_PACKS):
                 print(f"  Compendium index loaded from cache "
                       f"({len(cached['index'])} entries).")
                 return cached["index"]
@@ -612,7 +639,7 @@ def build_compendium_index(data_root: str) -> dict:
     try:
         _COMP_CACHE_PATH.parent.mkdir(exist_ok=True)
         _COMP_CACHE_PATH.write_text(
-            json.dumps({"mtime": max_mtime, "index": index}),
+            json.dumps({"mtime": max_mtime, "packs": COMPENDIUM_PACKS, "index": index}),
             encoding="utf-8"
         )
     except Exception as e:
@@ -636,7 +663,9 @@ def enrich_item(item: dict, compendium: dict) -> dict:
 
     sys_data  = dict(item.get("system", {}))
     desc_node = sys_data.get("description", {})
-    actor_desc = desc_node.get("value", "") if isinstance(desc_node, dict) else ""
+    # `or ""` — Foundry can store an explicit null value, which .get()'s
+    # default does not cover; .strip() on None would crash the whole export.
+    actor_desc = (desc_node.get("value") or "") if isinstance(desc_node, dict) else ""
     if not actor_desc.strip() and comp.get("desc"):
         desc_node = dict(desc_node) if isinstance(desc_node, dict) else {}
         desc_node["value"] = comp["desc"]
@@ -705,13 +734,22 @@ class FullExporter:
         if not original.exists():
             raise FileNotFoundError(f"Actor database not found at {original}")
 
-        self.temp_dir  = tempfile.mkdtemp()
-        actors_copy    = Path(self.temp_dir) / "actors"
-        shutil.copytree(str(original), str(actors_copy))
-        self.actors_db = plyvel.DB(str(actors_copy))
+        self.temp_dir = tempfile.mkdtemp()
+        try:
+            actors_copy    = Path(self.temp_dir) / "actors"
+            shutil.copytree(str(original), str(actors_copy))
+            self.actors_db = plyvel.DB(str(actors_copy))
 
-        print("Building compendium index…")
-        self.compendium = build_compendium_index(data_root)
+            print("Building compendium index…")
+            self.compendium = build_compendium_index(data_root)
+        except BaseException:
+            # close() is unreachable if __init__ raises (the caller never
+            # gets an object) — clean up the copied DB here instead of
+            # leaking it in the temp dir.
+            if getattr(self, "actors_db", None) is not None:
+                self.actors_db.close()
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+            raise
 
         # Combat record (last kill / last downed-by) is built lazily on first
         # access via combat_record(), since it requires reading the messages DB
@@ -720,10 +758,17 @@ class FullExporter:
         self._raw_msgs_cache = None
         self._campaign_stats_cache = None
         self._npc_appearances_cache = None
+        # Event-builder caches: combat_record() caches only its merged
+        # result, but campaign_stats() and SessionExporter both call the
+        # underlying builders again — each _build_npc_kill_events run
+        # re-copies and re-scans the scenes LevelDB from scratch without
+        # these. Consumers must treat the returned lists as read-only.
+        self._downing_events_cache = None
+        self._npc_kill_events_cache = None
 
     # ── Wiki page name tracking (renames) ───────────────────────────────────
 
-    _PAGE_NAMES_PATH = Path("session_snapshots") / "wiki_page_names.json"
+    _PAGE_NAMES_PATH = SCRIPT_DIR / "session_snapshots" / "wiki_page_names.json"
 
     def _load_page_names(self) -> dict:
         """
@@ -749,7 +794,7 @@ class FullExporter:
 
     # ── NPC appearances (written by SessionExporter.run) ────────────────────
 
-    _NPC_APPEARANCES_PATH = Path("session_snapshots") / "npc_appearances.json"
+    _NPC_APPEARANCES_PATH = SCRIPT_DIR / "session_snapshots" / "npc_appearances.json"
 
     def _load_npc_appearances(self) -> dict:
         """{"<actor_id>": {"20260630": "June 30, 2026", ...}}, cached after
@@ -811,8 +856,11 @@ class FullExporter:
                     # self-inflicted / persistent / sourceless
                     rec["last_downed_by"] = {"name": ev.get("source_label") or "—", "ts": ts}
 
-            # Attacker: record their kill (any non-self victim counts)
-            if atk_id and atk_id != vic_id and vic_name:
+            # Attacker: record their kill — actual NPC kill events only.
+            # A PC *downing* event is not a kill; without this check a
+            # friendly-fire AoE that merely downs an ally would show on the
+            # attacker's page as "last_kill: <ally>".
+            if ev.get("kind") == "kill" and atk_id and atk_id != vic_id and vic_name:
                 rec = record.setdefault(atk_id, {"last_kill": None, "last_downed_by": None})
                 rec["last_kill"] = {"name": vic_name, "ts": ts}
 
@@ -838,7 +886,13 @@ class FullExporter:
         the most recent hit on that victim — that hit's origin.actor is the
         attacker. No time window needed: "most recent hit before going down"
         is the correct attribution regardless of gap.
+
+        Cached after first build (see __init__) — called by combat_record()
+        and campaign_stats(). Callers must not mutate the returned list.
         """
+        if self._downing_events_cache is not None:
+            return self._downing_events_cache
+
         messages_path = self.world_path / "data" / "messages"
         if not messages_path.exists():
             print("  ⚠  No messages database — combat record unavailable.")
@@ -861,9 +915,12 @@ class FullExporter:
             ts     = m.get("timestamp", 0)
             msg_id = m.get("_id", "")
 
-            # Source A: appliedDamage (button-applied damage)
+            # Source A: appliedDamage (button-applied damage). isReverted
+            # means the GM undid the hit — it never landed, so it must not
+            # win "most recent hit" attribution for a downing.
             applied = pf.get("appliedDamage")
-            if isinstance(applied, dict) and not applied.get("isHealing"):
+            if (isinstance(applied, dict) and not applied.get("isHealing")
+                    and not applied.get("isReverted")):
                 victim_id = self._uuid_to_actor_id(applied.get("uuid", ""))
                 if not victim_id:
                     victim_id = (m.get("speaker") or {}).get("actor", "")
@@ -965,6 +1022,7 @@ class FullExporter:
                 atk_id, atk_name = "", ""
 
             events.append({
+                "kind":          "downing",
                 "attacker_id":   atk_id,
                 "attacker_name": atk_name,
                 "victim_id":     victim_id,
@@ -976,6 +1034,7 @@ class FullExporter:
         events.sort(key=lambda e: e["ts"])
         print(f"  Combat record: {len(events)} downing event(s) found "
               f"(from {len(hit_history)} actors with hit history).")
+        self._downing_events_cache = events
         return events
 
     @staticmethod
@@ -1063,30 +1122,147 @@ class FullExporter:
         self._raw_msgs_cache = raw_msgs
         return raw_msgs
 
+    # "Pirate Goblin takes 11 damage." / "Greykor is healed for 6 damage."
+    # NOTE: locale-dependent — these phrasings come from the pf2e system's
+    # English localization. A non-English Foundry install would render
+    # different text and every damage figure would silently read as 0.
+    _APPLIED_HP_RE = re.compile(r"(?:takes|is healed for)\s+([\d,]+)\s+damage", re.I)
+
+    @classmethod
+    def _applied_hp_amount(cls, msg: dict) -> int:
+        """
+        HP actually gained/lost by an applied-damage chat message.
+
+        This MUST be parsed out of the rendered content: the obvious-looking
+        flags.pf2e.appliedDamage.updates[].value is the victim's PRE-damage
+        HP (stored so the "Revert Damage" button can restore it), not the
+        amount applied. Summing that field instead yields "the victim's HP
+        before each hit", which lands in a plausible-looking range and so
+        reads as correct while being wrong — it was shipped that way in both
+        campaign_stats() and _compute_combat_stats() before being caught.
+
+        Returns 0 when no amount can be parsed.
+        """
+        match = cls._APPLIED_HP_RE.search(msg.get("content") or "")
+        return _int(match.group(1).replace(",", "")) if match else 0
+
+    def _build_npc_damage_kill_events(self) -> dict:
+        """
+        Detect NPC deaths by replaying "Apply Damage" chat messages.
+
+        A `damage-taken` message carries the victim's pre-damage HP in
+        flags.pf2e.appliedDamage.updates (that value exists so the "Revert
+        Damage" button can restore it — it is NOT the post-damage HP), and
+        the damage amount in the rendered content ("Pirate Goblin takes 11
+        damage."). Subtracting one from the other reconstructs the resulting
+        HP, so <= 0 means the blow killed that token.
+
+        This survives token deletion, which the ActorDelta signal
+        (_build_npc_kill_events) does not: clearing dead tokens off the map
+        destroys their delta document and with it the only record that they
+        ever hit 0 HP. It also attributes the *killing blow* exactly, rather
+        than guessing from the last hit on record, and takes the victim's
+        name from speaker.alias — the name at the time of death, not the base
+        Actor's current name (see the Cave Scorpion → Crystal Claw note in
+        CLAUDE.md).
+
+        It cannot see kills applied by dragging a token's HP bar to 0, since
+        those generate no chat message at all — hence both sources.
+
+        Returns token_id → event dict (latest killing blow per token).
+        """
+        name_by_actor, type_by_actor = self._actor_maps()
+
+        kills: dict[str, dict] = {}
+        for m in self._load_raw_messages():
+            pf      = (m.get("flags") or {}).get("pf2e") or {}
+            applied = pf.get("appliedDamage")
+            if not isinstance(applied, dict):
+                continue
+            # isReverted: the GM undid this damage, so it never happened.
+            if applied.get("isHealing") or applied.get("isReverted"):
+                continue
+
+            uuid      = applied.get("uuid", "")
+            victim_id = self._uuid_to_token_id(uuid)
+            actor_id  = self._uuid_to_actor_id(uuid)
+            if not victim_id or type_by_actor.get(actor_id) != "npc":
+                continue
+
+            pre_hp = None
+            for upd in applied.get("updates") or []:
+                if isinstance(upd, dict) and upd.get("path") == "system.attributes.hp.value":
+                    pre_hp = _int(upd.get("value"))
+            damage = self._applied_hp_amount(m)
+            if pre_hp is None or damage <= 0 or pre_hp - damage > 0:
+                continue
+
+            origin = pf.get("origin") or {}
+            atk_id = self._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
+            if not atk_id or atk_id == actor_id:
+                continue
+
+            ts = m.get("timestamp", 0)
+            if victim_id not in kills or ts > kills[victim_id]["ts"]:
+                kills[victim_id] = {
+                    "kind":          "kill",
+                    "attacker_id":   atk_id,
+                    "attacker_name": name_by_actor.get(atk_id, ""),
+                    "victim_id":     victim_id,
+                    "victim_name":   (m.get("speaker") or {}).get("alias")
+                                     or name_by_actor.get(actor_id, "Unknown"),
+                    "source_label":  "",
+                    "ts":            ts,
+                }
+        return kills
+
     def _build_npc_kill_events(self) -> list:
         """
-        Build a list of NPC-kill events using the per-token ActorDelta HP
-        override in the scenes DB as ground truth for "is this NPC dead".
+        Build a list of NPC-kill events from two independent sources, since
+        neither alone sees every death:
 
-        Chat messages alone can't detect most NPC deaths: NPCs don't get a
+        1. Replayed "Apply Damage" chat messages (_build_npc_damage_kill_events)
+           — reconstructs post-damage HP and catches kills whose token has
+           since been deleted from the scene.
+        2. The per-token ActorDelta HP override in the scenes DB (below) —
+           catches kills applied by dragging the HP bar to 0, which leave no
+           chat message at all.
+
+        Source 1 wins on conflict: it pins the exact killing blow, whereas the
+        delta signal only knows the token is dead *now* and has to guess the
+        attacker from the last hit on record.
+
+        Chat messages alone can't detect every NPC death: NPCs don't get a
         Dying/Unconscious condition card (that's a PC-only mechanic), and the
         killing blow is often applied by dragging the token's HP bar to 0
-        directly rather than via the chat "Apply Damage" button — which
-        leaves no trace in the message log. But every unlinked token has its
-        own ActorDelta document overriding HP for that specific instance
-        (independent of the shared base Actor, which GMs frequently reuse/
-        reset as a stat-block template across encounters), so a token's
-        current delta HP <= 0 is a reliable "this instance died" signal.
+        directly rather than via the chat "Apply Damage" button. But every
+        unlinked token has its own ActorDelta document overriding HP for that
+        specific instance (independent of the shared base Actor, which GMs
+        frequently reuse/reset as a stat-block template across encounters), so
+        a token's current delta HP <= 0 is a reliable "this instance died"
+        signal — for as long as the token exists.
 
-        Attribution: the last hit recorded against that specific token id
-        anywhere in the chat log (via context.target.token or
-        appliedDamage.uuid), since token ids are unique per encounter
-        instance — unlike actor ids, which multiple simultaneous copies of
-        the same monster type (e.g. 5 Cave Scorpion tokens) can share.
+        Attribution (delta source): the last hit recorded against that
+        specific token id anywhere in the chat log (via context.target.token
+        or appliedDamage.uuid), since token ids are unique per encounter
+        instance — unlike actor ids, which multiple simultaneous copies of the
+        same monster type (e.g. 5 Cave Scorpion tokens) can share.
+
+        Cached after first build (see __init__) — called by combat_record(),
+        campaign_stats(), and SessionExporter._extract_session_data, and each
+        uncached run re-copies and re-scans the scenes LevelDB. Callers must
+        not mutate the returned list.
         """
+        if self._npc_kill_events_cache is not None:
+            return self._npc_kill_events_cache
+
+        damage_kills = self._build_npc_damage_kill_events()
+
         scenes_path = self.world_path / "data" / "scenes"
         if not scenes_path.exists():
-            return []
+            self._npc_kill_events_cache = sorted(damage_kills.values(),
+                                                 key=lambda e: e["ts"])
+            return self._npc_kill_events_cache
 
         name_by_actor, type_by_actor = self._actor_maps()
 
@@ -1130,16 +1306,17 @@ class FullExporter:
             dtype    = delta.get("type") or type_by_actor.get(actor_id, "")
             if dtype != "npc":
                 continue
+            # Already pinned to an exact killing blow by the damage-message
+            # source, which is the better attribution — don't re-derive it.
+            if tid in damage_kills:
+                continue
             hp = delta.get("hp")
             if hp is not None and hp <= 0:
                 dead_npc_tokens.append((tid, base))
 
-        if not dead_npc_tokens:
-            return []
+        raw_msgs = self._load_raw_messages() if dead_npc_tokens else []
 
-        raw_msgs = self._load_raw_messages()
-
-        events = []
+        events = list(damage_kills.values())
         for tid, base in dead_npc_tokens:
             actor_id     = base.get("actorId")
             display_name = base.get("name") or name_by_actor.get(actor_id, "Unknown")
@@ -1161,6 +1338,7 @@ class FullExporter:
                     if best is None or ts > best[0]:
                         best = (ts, atk_id)
                 elif (isinstance(applied, dict) and not applied.get("isHealing")
+                      and not applied.get("isReverted")
                       and self._uuid_to_token_id(applied.get("uuid", "")) == tid):
                     if best is None or ts > best[0]:
                         best = (ts, atk_id)
@@ -1169,6 +1347,7 @@ class FullExporter:
                 continue
             ts, atk_id = best
             events.append({
+                "kind":          "kill",
                 "attacker_id":   atk_id,
                 "attacker_name": name_by_actor.get(atk_id, ""),
                 "victim_id":     tid,
@@ -1178,8 +1357,10 @@ class FullExporter:
             })
 
         print(f"  Combat record: {len(events)} NPC kill(s) found "
-              f"(from {len(dead_npc_tokens)} dead NPC token(s)).")
-        return sorted(events, key=lambda e: e["ts"])
+              f"({len(damage_kills)} from applied-damage messages, "
+              f"{len(events) - len(damage_kills)} from dead tokens still on a scene).")
+        self._npc_kill_events_cache = sorted(events, key=lambda e: e["ts"])
+        return self._npc_kill_events_cache
 
     # ── Campaign-wide cumulative stats ──────────────────────────────────────
 
@@ -1243,10 +1424,10 @@ class FullExporter:
         for m in self._load_raw_messages():
             pf      = (m.get("flags") or {}).get("pf2e") or {}
             applied = pf.get("appliedDamage")
-            if not isinstance(applied, dict):
+            # isReverted: the GM undid this damage, so it never landed.
+            if not isinstance(applied, dict) or applied.get("isReverted"):
                 continue
-            amount = sum(abs(_int(u.get("value", 0))) for u in (applied.get("updates") or [])
-                         if u.get("path") == "system.attributes.hp.value")
+            amount = self._applied_hp_amount(m)
             if amount <= 0:
                 continue
             victim_id = (self._uuid_to_actor_id(applied.get("uuid", ""))
@@ -1440,7 +1621,9 @@ class FullExporter:
         """
         Extract ability modifier. Priority:
           1. system.abilities.<slug>.mod   — pre-computed modifier
-          2. system.abilities.<slug>.value — score ≥ 18 (treat as score)
+          2. system.abilities.<slug>.value — value > 6 (treat as raw score;
+             see the "> 6 heuristic" note in CLAUDE.md — modifiers never
+             exceed +5, so anything above 6 is unambiguously a score)
           3. system.abilities.<slug>        — plain int (legacy)
           4. Rebuild from boosts across build.attributes + ancestry/class items
         """
@@ -1472,8 +1655,17 @@ class FullExporter:
         system.build.attributes.boosts only contains the FREE PICK tiers
         (level 1, 5, 10, 15, 20). Ancestry, background, and class boosts
         live on the respective ITEMS — we must read both sources.
+
+        Application order matters for the "+2 below 18, +1 at 18+" rule:
+        all flaws are applied first (canonically they come from the
+        ancestry step, before anything can reach 18), then every boost,
+        then the apex item last (invested gear, applied after creation
+        boosts). Apex is NOT a boost: it raises the score to 18 or by 2,
+        whichever is higher.
         """
-        score = 10
+        flaws  = 0
+        boosts = 0
+        apex   = False
 
         # ── Source 1: free-pick tiers + flaws in build.attributes ─────────
         build = system.get("build") or {}
@@ -1481,16 +1673,15 @@ class FullExporter:
         if isinstance(attrs, dict):
             for flaw_list in (attrs.get("flaws") or {}).values():
                 if isinstance(flaw_list, list) and slug in flaw_list:
-                    score -= 2
+                    flaws += 1
 
             for boost_list in (attrs.get("boosts") or {}).values():
                 if isinstance(boost_list, list) and slug in boost_list:
-                    score = score + 2 if score < 18 else score + 1
+                    boosts += 1
 
-            # Apex item boost
-            apex = attrs.get("apex")
-            if isinstance(apex, str) and apex == slug:
-                score = score + 2 if score < 18 else score + 1
+            apex_slug = attrs.get("apex")
+            if isinstance(apex_slug, str) and apex_slug == slug:
+                apex = True
 
         # ── Source 2: ancestry / background / class / heritage items ──────
         # ancestry/background: system.boosts[], system.flaws[]
@@ -1504,15 +1695,13 @@ class FullExporter:
                 boosts_raw = isys.get("boosts") or []
                 boost_iter = boosts_raw.values() if isinstance(boosts_raw, dict) else boosts_raw
                 for slot in boost_iter:
-                    chosen = _read_boost_slot(slot)
-                    if chosen == slug or (isinstance(chosen, list) and slug in chosen):
-                        score = score + 2 if score < 18 else score + 1
+                    if _read_boost_slot(slot) == slug:
+                        boosts += 1
                 flaws_raw = isys.get("flaws") or []
                 flaw_iter = flaws_raw.values() if isinstance(flaws_raw, dict) else flaws_raw
                 for slot in flaw_iter:
-                    chosen = _read_boost_slot(slot)
-                    if chosen == slug or (isinstance(chosen, list) and slug in chosen):
-                        score -= 2
+                    if _read_boost_slot(slot) == slug:
+                        flaws += 1
 
             elif itype == "class":
                 ka = isys.get("keyAbility") or {}
@@ -1547,14 +1736,20 @@ class FullExporter:
                     chosen = detail_key if detail_key in ka_val else None
 
                 if chosen == slug:
-                    score = score + 2 if score < 18 else score + 1
+                    boosts += 1
 
             elif itype == "heritage":
                 b = isys.get("boost") or isys.get("boosts")
                 if isinstance(b, str) and b == slug:
-                    score = score + 2 if score < 18 else score + 1
+                    boosts += 1
                 elif isinstance(b, list) and slug in b:
-                    score = score + 2 if score < 18 else score + 1
+                    boosts += 1
+
+        score = 10 - 2 * flaws
+        for _ in range(boosts):
+            score = score + 2 if score < 18 else score + 1
+        if apex:
+            score = max(score + 2, 18)
 
         return (score - 10) // 2
 
@@ -2188,14 +2383,13 @@ class FullExporter:
             weapon_range = s.get("range")
 
             # Ability modifier for the attack roll: finesse picks the better
-            # of Str/Dex; a thrown weapon (even one that's also "ranged" in
-            # the sense of having a range value, e.g. a javelin) always uses
-            # Str unless finesse; a true ranged weapon (bow/sling/firearm/
-            # crossbow — has a range but isn't "thrown") uses Dex.
+            # of Str/Dex; ALL ranged attack rolls use Dex — including thrown
+            # weapons like javelins/bolas (Str applies to thrown *damage*,
+            # not the attack roll). A melee weapon that can also be thrown
+            # (dagger/hatchet) carries a "thrown-N" trait and no range value,
+            # so it stays on the melee/Str path here.
             if "finesse" in traits:
                 atk_mod = max(str_mod, dex_mod)
-            elif "thrown" in traits:
-                atk_mod = str_mod
             elif weapon_range:
                 atk_mod = dex_mod
             else:
@@ -2441,7 +2635,8 @@ class FullExporter:
                 return _int(v.get("value", 0))
             return _int(v)
 
-        currency = {c: _coin(c) for c in ("pp", "gp", "sp", "cp")}
+        legacy_currency = {c: _coin(c) for c in ("pp", "gp", "sp", "cp")}
+        currency        = {c: 0 for c in ("pp", "gp", "sp", "cp")}
 
         # Coins can also be carried as treasure items in the inventory.
         # PF2e Remaster stores them WITHOUT a stackGroup — just a price
@@ -2468,6 +2663,14 @@ class FullExporter:
                             # price is per-unit value × quantity ÷ per
                             currency[denom] = (currency.get(denom, 0)
                                                + pv * qty // per)
+
+        # Remaster stores coins only as treasure items; the legacy
+        # system.currency wallet is a pre-migration leftover. A migrated
+        # world can carry BOTH representations of the same money, so only
+        # fall back to the legacy wallet when no coin items exist at all —
+        # summing both would double the reported wealth.
+        if not any(currency.values()):
+            currency = legacy_currency
 
         # ── Bulk ──────────────────────────────────────────────────────────
         # system.bulk is not pre-computed in Remaster — calculate from items.
@@ -2603,6 +2806,37 @@ class FullExporter:
         portrait = icon_url(actor.get("img", ""), "character", allow_iconics=True)
 
         feats, spells, spell_entries = [], [], {}
+
+        # Pass 1: collect ALL spellcastingEntry items before assigning any
+        # spell to an entry. Items come back in LevelDB key order (random
+        # ids), so a single-pass loop misfiles every spell whose entry
+        # document happens to sort after it into "Other Spells".
+        for item in items:
+            if item.get("type") != "spellcastingEntry":
+                continue
+            entry_id = item.get("_id", "")
+            isys     = item.get("system") or {}
+            trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
+            ctype    = isys.get("prepared",  {}).get("value", "") if isinstance(isys.get("prepared"),  dict) else ""
+            dc_node  = isys.get("spelldc") or {}
+            dc       = _int(dc_node.get("dc"))    if isinstance(dc_node, dict) else 0
+            atk      = _int(dc_node.get("value")) if isinstance(dc_node, dict) else 0
+            if not dc and not atk:
+                dc, atk = self._spell_dc_attack(isys, abilities, level, items, rules_ranks)
+            slots    = {}
+            for slot_key, slot_data in (isys.get("slots") or {}).items():
+                if isinstance(slot_data, dict):
+                    rn = slot_key.replace("slot", "")
+                    if rn.isdigit():
+                        smax = _int(slot_data.get("max", 0))
+                        if smax:
+                            slots[_int(rn)] = {"value": _int(slot_data.get("value", 0)), "max": smax}
+            spell_entries[entry_id] = {
+                "name": item.get("name", ""), "tradition": trad, "type": ctype,
+                "dc": dc, "attack": atk, "spells": [], "slots": slots,
+                "img": icon_url(item.get("img", ""), "spellcastingEntry"),
+            }
+
         for item in items:
             itype = item.get("type", "")
 
@@ -2621,30 +2855,6 @@ class FullExporter:
                     "traits": traits_v, "desc": desc,
                     "img": icon_url(item.get("img", ""), itype),
                 })
-
-            elif itype == "spellcastingEntry":
-                entry_id = item.get("_id", "")
-                isys     = item.get("system") or {}
-                trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
-                ctype    = isys.get("prepared",  {}).get("value", "") if isinstance(isys.get("prepared"),  dict) else ""
-                dc_node  = isys.get("spelldc") or {}
-                dc       = _int(dc_node.get("dc"))    if isinstance(dc_node, dict) else 0
-                atk      = _int(dc_node.get("value")) if isinstance(dc_node, dict) else 0
-                if not dc and not atk:
-                    dc, atk = self._spell_dc_attack(isys, abilities, level, items, rules_ranks)
-                slots    = {}
-                for slot_key, slot_data in (isys.get("slots") or {}).items():
-                    if isinstance(slot_data, dict):
-                        rn = slot_key.replace("slot", "")
-                        if rn.isdigit():
-                            smax = _int(slot_data.get("max", 0))
-                            if smax:
-                                slots[_int(rn)] = {"value": _int(slot_data.get("value", 0)), "max": smax}
-                spell_entries[entry_id] = {
-                    "name": item.get("name", ""), "tradition": trad, "type": ctype,
-                    "dc": dc, "attack": atk, "spells": [], "slots": slots,
-                    "img": icon_url(item.get("img", ""), itype),
-                }
 
             elif itype == "spell":
                 isys     = item.get("system") or {}
@@ -3148,7 +3358,6 @@ class FullExporter:
 
         perc_node = attrs.get("perception") or {}
         perc_val  = _int(perc_node.get("value", 0) if isinstance(perc_node, dict) else (perc_node or 0))
-        perc_mod  = perc_node.get("mod", perc_val) if isinstance(perc_node, dict) else perc_val
 
         speed_node  = attrs.get("speed") or {}
         if isinstance(speed_node, dict):
@@ -3245,6 +3454,26 @@ class FullExporter:
 
         # ── Actions / abilities / spells from items ────────────────────────
         actions, spells, spell_entries = [], [], {}
+
+        # Pass 1: collect ALL spellcastingEntry items first — items arrive in
+        # LevelDB key order, so a spell can precede its own entry (see the
+        # same pre-pass in _parse_character).
+        for item in items:
+            if item.get("type") != "spellcastingEntry":
+                continue
+            entry_id = item.get("_id", "")
+            isys     = item.get("system") or {}
+            trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
+            ctype    = isys.get("prepared", {}).get("value", "")  if isinstance(isys.get("prepared"),  dict) else ""
+            dc_node  = isys.get("spelldc") or {}
+            dc       = dc_node.get("dc")    if isinstance(dc_node, dict) else None
+            atk      = dc_node.get("value") if isinstance(dc_node, dict) else None
+            spell_entries[entry_id] = {
+                "name": item.get("name", ""), "tradition": trad, "type": ctype,
+                "dc": dc, "attack": atk, "spells": [], "slots": {},
+                "img": icon_url(item.get("img", ""), "spellcastingEntry"),
+            }
+
         for item in items:
             itype = item.get("type", "")
 
@@ -3278,20 +3507,6 @@ class FullExporter:
                     "desc":    desc,
                     "img":     icon_url(item.get("img", ""), itype),
                 })
-
-            elif itype == "spellcastingEntry":
-                entry_id = item.get("_id", "")
-                isys     = item.get("system") or {}
-                trad     = isys.get("tradition", {}).get("value", "") if isinstance(isys.get("tradition"), dict) else ""
-                ctype    = isys.get("prepared", {}).get("value", "")  if isinstance(isys.get("prepared"),  dict) else ""
-                dc_node  = isys.get("spelldc") or {}
-                dc       = dc_node.get("dc")    if isinstance(dc_node, dict) else None
-                atk      = dc_node.get("value") if isinstance(dc_node, dict) else None
-                spell_entries[entry_id] = {
-                    "name": item.get("name", ""), "tradition": trad, "type": ctype,
-                    "dc": dc, "attack": atk, "spells": [], "slots": {},
-                    "img": icon_url(item.get("img", ""), itype),
-                }
 
             elif itype == "spell":
                 isys     = item.get("system") or {}
@@ -3671,9 +3886,28 @@ class FullExporter:
         page_names = self._load_page_names()
         section    = page_names.setdefault(prefix, {})
 
+        # Two actors whose names sanitize to the same title (duplicate
+        # names, or e.g. "A/B" vs "A-B") would otherwise silently share one
+        # wiki page, last writer wins. Disambiguate deterministically: the
+        # lowest actor id keeps the plain title, the rest get a stable
+        # short-id suffix (stable across runs, so the rename machinery
+        # doesn't ping-pong pages).
+        title_owners: dict[str, list] = {}
         for actor in actors:
-            name     = self._sanitize_page_title(actor["name"])
+            title_owners.setdefault(self._sanitize_page_title(actor["name"]),
+                                    []).append(actor.get("id") or "")
+        resolved_titles: dict[str, str] = {}
+        for title, ids in title_owners.items():
+            if len(ids) > 1:
+                print(f"  ⚠  {len(ids)} actors share the page title "
+                      f"'{title}' — disambiguating with id suffixes.")
+            for n, aid in enumerate(sorted(ids)):
+                resolved_titles[aid] = title if n == 0 else f"{title} ({aid[:5]})"
+
+        for actor in actors:
             actor_id = actor.get("id")
+            name     = (resolved_titles.get(actor_id or "")
+                        or self._sanitize_page_title(actor["name"]))
             try:
                 # If this actor id was last pushed under a different name,
                 # move the existing page instead of creating a duplicate.
@@ -3780,8 +4014,21 @@ class FullExporter:
                 kind = "NPC" if npcs else "character"
                 print(f"✗  No {kind} named '{target_name}' found.")
                 return
-        out_dir = Path("wiki_preview")
+        out_dir = SCRIPT_DIR / "wiki_preview"
         out_dir.mkdir(exist_ok=True)
+
+        # A full preview (no --char filter) is a complete regeneration of
+        # this kind — clear stale files first so renamed/deleted actors
+        # don't leave orphaned .wiki files behind. Special pages (Party
+        # Stash/Overview, Campaign Stats) belong to other preview methods.
+        if target_name is None:
+            _SPECIAL = {"Party_Stash.wiki", "Party_Overview.wiki", "Campaign_Stats.wiki"}
+            for f in out_dir.glob("*.wiki"):
+                if f.name in _SPECIAL:
+                    continue
+                if f.name.startswith("NPC_") == npcs:
+                    f.unlink(missing_ok=True)
+
         for actor in actors:
             markup   = self.render_npc_page(actor) if npcs else self.render_character_page(actor)
             filename = out_dir / f"{'NPC_' if npcs else ''}{actor['name'].replace(' ','_').replace('/','_')}.wiki"
@@ -3793,7 +4040,7 @@ class FullExporter:
         if not parties:
             print("  ⚠  No party actor found.")
             return
-        out_dir  = Path("wiki_preview")
+        out_dir  = SCRIPT_DIR / "wiki_preview"
         out_dir.mkdir(exist_ok=True)
         filename = out_dir / "Party_Stash.wiki"
         filename.write_text(self.render_party_stash_page(parties), encoding="utf-8")
@@ -3804,14 +4051,14 @@ class FullExporter:
         if not chars:
             print("  ⚠  No characters found.")
             return
-        out_dir  = Path("wiki_preview")
+        out_dir  = SCRIPT_DIR / "wiki_preview"
         out_dir.mkdir(exist_ok=True)
         filename = out_dir / "Party_Overview.wiki"
         filename.write_text(self.render_party_overview_page(chars), encoding="utf-8")
         print(f"✓  Preview written: {filename}")
 
     def preview_campaign_stats(self):
-        out_dir = Path("wiki_preview")
+        out_dir = SCRIPT_DIR / "wiki_preview"
         out_dir.mkdir(exist_ok=True)
         filename = out_dir / "Campaign_Stats.wiki"
         filename.write_text(self.render_campaign_stats_page(), encoding="utf-8")
@@ -3838,7 +4085,7 @@ class SessionExporter:
       Archive copies saved as session_snapshots/snapshot_YYYYMMDD.json.
     """
 
-    SNAPSHOT_DIR = Path("session_snapshots")
+    SNAPSHOT_DIR = SCRIPT_DIR / "session_snapshots"
     SESSION_HOUR = 4
 
     def __init__(self, world_path: str, full_exporter: "FullExporter"):
@@ -4136,6 +4383,14 @@ class SessionExporter:
                 elif o.startswith("encounter:turn:"):
                     turn_n = _int(o.split(":")[-1])
 
+            # Track the encounter's highest round from ANY message carrying a
+            # round tag (attack rolls, saves, own-turn rolls) — not just
+            # applied-damage messages, which undercount rounds where no
+            # button-applied damage landed (deflating both the "N rounds"
+            # line and the per-round damage-taken denominator).
+            if round_n:
+                max_round[widx] = max(max_round[widx], round_n)
+
             # Turn presence: this message's own actor is acting on their turn.
             if "self:participant:own-turn" in opts and round_n is not None and turn_n is not None:
                 actor_id = ctx.get("actor") or (m.get("speaker") or {}).get("actor", "")
@@ -4144,12 +4399,10 @@ class SessionExporter:
 
             # Damage dealt/taken (non-healing only).
             applied = pf.get("appliedDamage")
-            if isinstance(applied, dict) and not applied.get("isHealing"):
-                amount = sum(abs(_int(u.get("value", 0))) for u in (applied.get("updates") or [])
-                             if u.get("path") == "system.attributes.hp.value")
+            if (isinstance(applied, dict) and not applied.get("isHealing")
+                    and not applied.get("isReverted")):
+                amount = fe._applied_hp_amount(m)
                 if amount > 0:
-                    if round_n:
-                        max_round[widx] = max(max_round[widx], round_n)
                     victim_id = fe._uuid_to_actor_id(applied.get("uuid", ""))
                     if not victim_id:
                         victim_id = (m.get("speaker") or {}).get("actor", "")
@@ -4287,7 +4540,17 @@ class SessionExporter:
         legacy = self._snapshot_path("latest")
         return legacy if legacy.exists() else None
 
-    def _save_snapshot(self, all_chars: list, date_label: str):
+    @staticmethod
+    def _snapshot_characters(all_chars: list) -> dict:
+        """
+        Snapshot-shaped view of the given actors' inventories/levels — the
+        same {char_id: {name, items: {iid: {...}}, level, xp}} structure
+        _save_snapshot persists. _compute_loot/_compute_xp diff two of
+        these, so the "current" side can be either live world state (a
+        normal run) or a stored snapshot's "characters" (a --session-date
+        rebuild, where today's live state has nothing to do with the
+        window being rebuilt).
+        """
         PHYSICAL = {"weapon","armor","shield","consumable","ammo",
                     "equipment","treasure","backpack","kit"}
         snapshot = {}
@@ -4308,7 +4571,10 @@ class SessionExporter:
                 }
             snapshot[char["id"]] = {"name": char["name"], "items": items,
                                      "level": char.get("level"), "xp": char.get("xp")}
+        return snapshot
 
+    def _save_snapshot(self, all_chars: list, date_label: str):
+        snapshot = self._snapshot_characters(all_chars)
         data    = {"timestamp": datetime.now().isoformat(), "characters": snapshot}
         payload = json.dumps(data, indent=2)
         self._snapshot_path("latest").write_text(payload, encoding="utf-8")
@@ -4324,9 +4590,14 @@ class SessionExporter:
             except OSError:
                 pass
 
-    def _compute_loot(self, all_chars: list, party_ids: frozenset = frozenset(),
+    def _compute_loot(self, curr_chars: dict, party_ids: frozenset = frozenset(),
                        snap_file: Path | None = None) -> tuple[list[dict], list[dict]]:
-        """Return (gained, removed) item lists relative to snap_file (defaults to the latest snapshot)."""
+        """
+        Return (gained, removed) item lists relative to snap_file (defaults
+        to the latest snapshot). `curr_chars` is a snapshot-shaped view (see
+        _snapshot_characters) — live state on a normal run, or the stored
+        end-of-window snapshot's "characters" on a --session-date rebuild.
+        """
         if snap_file is None:
             snap_file = self._snapshot_path("latest")
         if not snap_file.exists():
@@ -4340,28 +4611,26 @@ class SessionExporter:
             return [], []
 
         prev_chars = prev.get("characters", {})
-        PHYSICAL   = {"weapon","armor","shield","consumable","ammo",
-                      "equipment","treasure","backpack","kit"}
         gained  = []
         removed = []
 
-        for char in all_chars:
-            char_id    = char["id"]
-            char_name  = char["name"]
+        for char_id, char in curr_chars.items():
+            char_name  = char.get("name", "Unknown")
             is_party   = char_id in party_ids
+            # An actor absent from the baseline snapshot (a newly-created PC
+            # or a party stash tracked for the first time) has no diff basis;
+            # counting their entire starting inventory as "loot gained this
+            # session" would be noise. Skip them — same policy as _compute_xp.
+            if char_id not in prev_chars:
+                continue
             prev_items = prev_chars.get(char_id, {}).get("items", {})
-            curr_ids   = set()
+            curr_items = char.get("items", {})
 
-            for item in char.get("items", []):
-                if item.get("type") not in PHYSICAL:
-                    continue
-                iid     = item.get("_id", "")
-                isys    = item.get("system") or {}
-                qty     = _int(isys.get("quantity", 1) if isinstance(isys, dict) else 1)
+            for iid, item in curr_items.items():
+                qty     = _int(item.get("qty", 1))
                 name    = item.get("name", "Unknown")
                 img     = icon_url(item.get("img", ""), item.get("type", ""))
-                unit_gp = item_unit_gp(item)
-                curr_ids.add(iid)
+                unit_gp = item.get("unit_gp", 0.0)
 
                 if iid not in prev_items:
                     gained.append({"char": char_name, "name": name, "qty": qty, "img": img,
@@ -4383,7 +4652,7 @@ class SessionExporter:
             # recorded in the snapshot itself (missing on pre-existing
             # snapshots saved before this field was added, hence .get(...,0)).
             for iid, prev_item in prev_items.items():
-                if iid not in curr_ids:
+                if iid not in curr_items:
                     prev_qty = prev_item.get("qty", 1)
                     removed.append({"char": char_name, "name": prev_item.get("name", "Unknown"),
                                     "qty": prev_qty, "img": "", "type": "",
@@ -4392,11 +4661,13 @@ class SessionExporter:
 
         return gained, removed
 
-    def _compute_xp(self, all_chars: list, characters_present: list,
+    def _compute_xp(self, curr_chars: dict, characters_present: list,
                      snap_file: Path | None = None) -> list[dict]:
         """
         Return XP gained this session for each PC in characters_present,
-        relative to snap_file (defaults to the latest snapshot).
+        relative to snap_file (defaults to the latest snapshot). `curr_chars`
+        is a snapshot-shaped view (see _snapshot_characters), same as
+        _compute_loot.
 
         PF2e resets a character's xp field to a small remainder after a
         level-up, so a raw xp delta would go negative across a level-up
@@ -4419,14 +4690,14 @@ class SessionExporter:
         present    = set(characters_present)
         results    = []
 
-        for char in all_chars:
-            if char["name"] not in present:
+        for char_id, char in curr_chars.items():
+            if char.get("name") not in present:
                 continue
             level, xp = char.get("level"), char.get("xp")
             if level is None or xp is None or not str(xp).strip():
                 continue
 
-            prev_entry = prev_chars.get(char["id"])
+            prev_entry = prev_chars.get(char_id)
             if (not prev_entry or prev_entry.get("level") is None
                     or prev_entry.get("xp") is None
                     or not str(prev_entry.get("xp")).strip()):
@@ -4708,8 +4979,13 @@ class SessionExporter:
         enc_m = re.search(r"Encounters: (\d+)", text)
         num_combats = int(enc_m.group(1)) if enc_m else 0
         chars = re.findall(r"^\* \[\[Characters/[^|]+\|(.+?)\]\]$", text, re.MULTILINE)
+        # XP was awarded iff the XP section exists and isn't the empty-state
+        # placeholder (pages predating the XP section count as no-XP).
+        has_xp = (re.search(r"^== XP Gained ==", text, re.MULTILINE) is not None
+                  and "No XP change recorded" not in text)
         return {"label": label, "ingame_date": ingame_date,
-                "num_combats": num_combats, "characters_present": chars}
+                "num_combats": num_combats, "characters_present": chars,
+                "has_xp": has_xp}
 
     def _bootstrap_session_index(self, site, index: dict) -> dict:
         """Backfill index entries for Sessions/* pages that already exist on
@@ -4725,7 +5001,15 @@ class SessionExporter:
         for p in wiki_pages:
             name = getattr(p, "name", "") or ""
             date_str = name.split("/", 1)[1] if "/" in name else ""
-            if not date_str or not date_str.isdigit() or date_str in index:
+            if not date_str or not date_str.isdigit():
+                continue
+            if date_str in index:
+                # Entry exists but predates the has_xp field — backfill it
+                # from the live page so the LatestSession redirect can see it.
+                if "has_xp" not in index[date_str]:
+                    entry = self._parse_session_page_metadata(p.text(), date_str)
+                    if entry:
+                        index[date_str]["has_xp"] = entry["has_xp"]
                 continue
             entry = self._parse_session_page_metadata(p.text(), date_str)
             if entry:
@@ -4884,6 +5168,103 @@ class SessionExporter:
         page.edit(new_markup, summary="Auto-sync: regenerate Sessions index.")
         print(f"✓  {'Created' if not current_markup else 'Updated'}: Sessions index")
 
+    # Empty-state placeholder lines emitted by render_session_page — a page
+    # showing ALL of these recorded nothing. Older script versions pushed a
+    # session page even when no activity occurred; --cleanup deletes those.
+    _EMPTY_SESSION_MARKERS = (
+        "No player characters recorded in combat this session.",
+        "No XP change recorded this session.",
+        "No enemies encountered this session.",
+        "No new items recorded this session.",
+    )
+
+    @classmethod
+    def _is_empty_session_page(cls, text: str) -> bool:
+        """True if a rendered session page records no data at all — every
+        data section is its empty-state placeholder. Any real content
+        (an items-spent section, an encounter block) disqualifies it."""
+        if not text:
+            return False
+        if "== Items Spent / Removed ==" in text:
+            return False
+        if "'''Encounter " in text or "! Character !! Total Dealt" in text:
+            return False
+        return all(m in text for m in cls._EMPTY_SESSION_MARKERS)
+
+    def cleanup_empty_sessions(self, site):
+        """Delete Sessions/YYYYMMDD wiki pages with no recorded data (see
+        _EMPTY_SESSION_MARKERS), then drop those dates from the local
+        index, re-patch surviving pages' nav links, and regenerate the
+        Sessions index, Campaign Timeline, and LatestSession redirect."""
+        index = self._load_full_session_index(site)
+        try:
+            wiki_pages = list(site.allpages(prefix="Sessions/"))
+        except Exception as e:
+            print(f"  ⚠  Could not list Sessions pages: {e}")
+            return
+
+        deleted = []
+        for p in wiki_pages:
+            name = getattr(p, "name", "") or ""
+            date_str = name.split("/", 1)[1] if "/" in name else ""
+            if not date_str or not date_str.isdigit():
+                continue
+            if not self._is_empty_session_page(p.text()):
+                continue
+            try:
+                p.delete(reason="Auto-cleanup: empty session page (no data recorded).")
+            except Exception as e:
+                # Deleting needs wiki delete rights — leave the page (and
+                # its index entry) alone if the API refuses.
+                print(f"  ⚠  Could not delete {name}: {e}")
+                continue
+            deleted.append(date_str)
+            index.pop(date_str, None)
+            print(f"  ✗  Deleted empty session page: {name}")
+
+        if not deleted:
+            print("  –  No empty session pages found.")
+            return
+
+        self._save_session_index(index)
+
+        # A deleted date may have sat between two surviving sessions, so
+        # recompute every remaining page's nav line (unchanged pages skip).
+        for date_str in sorted(index.keys()):
+            title   = f"Sessions/{date_str}"
+            page    = site.pages[title]
+            current = page.text()
+            if not current:
+                continue
+            patched = self._replace_nav_line(current, self._session_nav_line(date_str, index))
+            if self._comparable(patched) != self._comparable(current):
+                page.edit(patched, summary="Auto-cleanup: update session nav links.")
+                print(f"  ↪  Updated nav links: {title}")
+
+        self.push_sessions_index(site, index)
+        self.push_campaign_timeline(site, index)
+        self.push_latest_session_redirect(site, index)
+
+    def push_latest_session_redirect(self, site, index: dict):
+        """Point the 'LatestSession' page at the most recent session that
+        had characters present or XP awarded, so a stable wiki URL always
+        lands on the last real play session (loot-only bookkeeping windows
+        don't qualify)."""
+        candidates = [d for d, e in index.items()
+                      if e.get("characters_present") or e.get("has_xp")]
+        if not candidates:
+            print("  ⚠  No session with characters or XP — skipping LatestSession redirect.")
+            return
+        target  = max(candidates)
+        markup  = f"#REDIRECT [[Sessions/{target}]]"
+        page    = site.pages["LatestSession"]
+        current = page.text()
+        if current.strip() == markup:
+            print(f"  –  LatestSession already points at Sessions/{target}")
+            return
+        page.edit(markup, summary=f"Auto-sync: point LatestSession at Sessions/{target}.")
+        print(f"✓  LatestSession → Sessions/{target}")
+
     def push_campaign_timeline(self, site, index: dict = None):
         """Regenerate and push the 'Campaign Timeline' page."""
         index = self._load_full_session_index(site, index)
@@ -4927,11 +5308,39 @@ class SessionExporter:
         # --session-date rebuild of a past window could point at a snapshot
         # that has nothing to do with the state actually being diffed.
         baseline_path = self._baseline_snapshot_path(date_str)
-        loot, removed = self._compute_loot(inventory_entities, party_ids, snap_file=baseline_path)
+        is_rebuild    = start_date is not None
+
+        # The CURRENT side of the diff must match the window too: on a
+        # normal run that's live world state, but a --session-date rebuild
+        # must use the end-of-window snapshot saved by that day's original
+        # run — diffing today's live state against a historical baseline
+        # would attribute everything gained SINCE that window to it. With
+        # no end-of-window snapshot on disk there is nothing correct to
+        # diff, so the loot/XP sections are skipped rather than inflated.
+        if is_rebuild:
+            curr_view = None
+            end_snap  = self._snapshot_path(date_str)
+            if end_snap.exists():
+                try:
+                    curr_view = json.loads(
+                        end_snap.read_text(encoding="utf-8")).get("characters", {})
+                except Exception as e:
+                    print(f"  ⚠  Could not read {end_snap.name}: {e}")
+            if curr_view is None:
+                print(f"  ⚠  No end-of-window snapshot for {date_str} — "
+                      f"loot/XP diff skipped (live state would misattribute "
+                      f"everything gained since that window).")
+        else:
+            curr_view = self._snapshot_characters(inventory_entities)
+
+        if curr_view is not None:
+            loot, removed = self._compute_loot(curr_view, party_ids, snap_file=baseline_path)
+            xp_data = self._compute_xp(curr_view, session_data["characters_present"],
+                                       snap_file=baseline_path)
+        else:
+            loot, removed, xp_data = [], [], []
         print(f"  Loot items gained:  {len(loot)}")
         print(f"  Items removed:      {len(removed)}")
-
-        xp_data = self._compute_xp(all_chars, session_data["characters_present"], snap_file=baseline_path)
         print(f"  XP changes:         {len(xp_data)}")
 
         char_by_id    = {c["id"]: c["name"] for c in all_chars if c.get("id")}
@@ -4952,8 +5361,8 @@ class SessionExporter:
         # snapshot here would mislabel today's state as date_str's, clobbering
         # the one archival artifact that could make a future rebuild of that
         # day correct (and re-baselining snapshot_latest against today's
-        # state right after diffing against it above). Skip both for rebuilds.
-        is_rebuild = start_date is not None
+        # state right after diffing against it above). Skip both for rebuilds
+        # (is_rebuild — set above, where it also picks the diff's current side).
 
         if not has_activity:
             print(f"  –  No activity detected — skipping session page for {date_str}.")
@@ -4980,6 +5389,7 @@ class SessionExporter:
             "ingame_date": ingame_date or (old_entry.get("ingame_date") if old_entry else None),
             "num_combats": session_data["num_combats"],
             "characters_present": session_data["characters_present"],
+            "has_xp": bool(xp_data),
         }
         nav = self._session_nav_line(date_str, index)
 
@@ -4989,6 +5399,9 @@ class SessionExporter:
         for enemy in session_data["enemies_encountered"]:
             npc_appearances.setdefault(enemy["id"], {})[date_str] = index[date_str]["label"]
         self._save_npc_appearances(npc_appearances)
+        # Drop the FullExporter's in-memory copy so NPC pages rendered later
+        # in this same run pick up the appearances just written.
+        self.full_exporter._npc_appearances_cache = None
 
         markup     = self.render_session_page(date_str, session_data, loot, start, end, removed,
                                               ingame_date, xp_data, combat_stats, nav)
@@ -5020,6 +5433,7 @@ class SessionExporter:
         index = self._load_full_session_index(site, index)
         self.push_sessions_index(site, index)
         self.push_campaign_timeline(site, index)
+        self.push_latest_session_redirect(site, index)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -5033,18 +5447,18 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  Preview all PCs:                python full-exporter.py
-  Push all PCs:                   python full-exporter.py --push
-  Preview one PC:                 python full-exporter.py --char "Seraphina Voss"
-  Push one PC:                    python full-exporter.py --char "Seraphina Voss" --push
-  Preview all NPCs:               python full-exporter.py --npcs
-  Push all NPCs:                  python full-exporter.py --npcs --push
-  Push NPCs + session:            python full-exporter.py --npcs --push --session
-  Push PCs + session:             python full-exporter.py --push --session
-  Push PCs + NPCs + session:      python full-exporter.py --push --npcs --session
-  Push campaign stats page:       python full-exporter.py --push --stats
-  Push party overview page:       python full-exporter.py --push --overview
-  Debug raw data:                 python full-exporter.py --char "Name" --debug
+  Preview all PCs:                python full-export.py
+  Push all PCs:                   python full-export.py --push
+  Preview one PC:                 python full-export.py --char "Seraphina Voss"
+  Push one PC:                    python full-export.py --char "Seraphina Voss" --push
+  Preview all NPCs:               python full-export.py --npcs
+  Push all NPCs:                  python full-export.py --npcs --push
+  Push NPCs + session:            python full-export.py --npcs --push --session
+  Push PCs + session:             python full-export.py --push --session
+  Push PCs + NPCs + session:      python full-export.py --push --npcs --session
+  Push campaign stats page:       python full-export.py --push --stats
+  Push party overview page:       python full-export.py --push --overview
+  Debug raw data:                 python full-export.py --char "Name" --debug
 """)
     parser.add_argument("--push",          action="store_true",
                         help="Push to wiki (default: preview only)")
@@ -5064,6 +5478,9 @@ Examples:
                         help="Rebuild a specific past session window instead of today's "
                              "(the window's START date, e.g. --session-date 2026-06-30 "
                              "rebuilds June 30 04:00 -> July 1 04:00, page Sessions/20260630)")
+    parser.add_argument("--cleanup",       action="store_true",
+                        help="Delete Sessions/* wiki pages that recorded no data "
+                             "(older versions pushed a page even when nothing happened)")
     parser.add_argument("--debug",         action="store_true",
                         help="Dump raw system data for --char")
     parser.add_argument("--world",         default=WORLD_PATH,
@@ -5073,6 +5490,17 @@ Examples:
     parser.add_argument("--no-compendium", action="store_true",
                         help="Skip compendium enrichment (faster)")
     args = parser.parse_args()
+
+    # --session-date is only consumed by the --push --session path; fail
+    # loudly rather than silently ignoring it (and reject a malformed date
+    # before doing any expensive work).
+    if args.session_date:
+        if not (args.push and args.session):
+            parser.error("--session-date requires both --push and --session")
+        try:
+            datetime.strptime(args.session_date, "%Y-%m-%d")
+        except ValueError:
+            parser.error(f"--session-date must be YYYY-MM-DD, got: {args.session_date}")
 
     exporter = FullExporter(args.world,
                             data_root=("" if args.no_compendium else args.data))
@@ -5091,10 +5519,22 @@ Examples:
             print("\n── Player Characters ──────────────────────────────────")
             exporter.push_to_wiki(site, target_name=args.char, npcs=False)
 
-            # Optionally also push NPCs in the same run
+            # Session export runs BEFORE the NPC push: it updates
+            # npc_appearances.json, which NPC pages' "Appearances" sections
+            # read — pushing NPCs first would render them one session stale.
+            if args.session:
+                # Format already validated right after parse_args.
+                session_start = (datetime.strptime(args.session_date, "%Y-%m-%d")
+                                 if args.session_date else None)
+                all_chars = exporter.get_all_characters()
+                sess = SessionExporter(args.world, exporter)
+                sess.run(site, all_chars, session_start)
+
+            # Optionally also push NPCs in the same run (honoring --char,
+            # same as preview mode — a named actor may be a PC or an NPC).
             if args.npcs:
                 print("\n── NPCs ────────────────────────────────────────────")
-                exporter.push_to_wiki(site, target_name=None, npcs=True)
+                exporter.push_to_wiki(site, target_name=args.char, npcs=True)
 
             # Optionally push the party stash
             if args.party:
@@ -5111,23 +5551,18 @@ Examples:
                 print("\n── Party Overview ──────────────────────────────────")
                 exporter.push_party_overview(site)
 
-            # Optionally push session log
-            if args.session:
-                session_start = None
-                if args.session_date:
-                    try:
-                        session_start = datetime.strptime(args.session_date, "%Y-%m-%d")
-                    except ValueError:
-                        print(f"--session-date must be YYYY-MM-DD, got: {args.session_date}")
-                        sys.exit(1)
-                all_chars = exporter.get_all_characters()
+            # Optionally delete legacy empty session pages
+            if args.cleanup:
+                print("\n── Session Cleanup ─────────────────────────────────")
                 sess = SessionExporter(args.world, exporter)
-                sess.run(site, all_chars, session_start)
+                sess.cleanup_empty_sessions(site)
 
         else:
             # Preview mode
             if args.session:
                 print("Note: --session only runs in --push mode. Previewing instead.")
+            if args.cleanup:
+                print("Note: --cleanup only runs in --push mode. Skipping.")
             exporter.preview(target_name=args.char, npcs=args.npcs)
             if args.party:
                 exporter.preview_party_stash()
