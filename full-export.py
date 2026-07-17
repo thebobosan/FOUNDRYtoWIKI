@@ -765,6 +765,17 @@ class FullExporter:
         # these. Consumers must treat the returned lists as read-only.
         self._downing_events_cache = None
         self._npc_kill_events_cache = None
+        # Actor-parsing caches: a --push --npcs --session --overview run
+        # otherwise calls get_all_npcs()/get_all_characters() up to 3×
+        # each (push, session data, overview), and every _get_actor_items
+        # call full-scanned the actors LevelDB per actor. The items map is
+        # built in a single pass; parsed lists are cached like
+        # _raw_msgs_cache. Consumers must treat all of these as read-only.
+        self._items_by_actor_cache = None
+        self._actor_maps_cache = None
+        self._characters_cache = None
+        self._npcs_cache = None
+        self._parties_cache = None
 
     # ── Wiki page name tracking (renames) ───────────────────────────────────
 
@@ -1064,13 +1075,15 @@ class FullExporter:
         return tail.split(".")[0] if tail else ""
 
     def _actor_maps(self) -> tuple:
-        """Build actor id → name and actor id → type maps from the actors DB."""
+        """Actor id → name and actor id → type maps, cached after first
+        build — every combat-record/campaign-stats consumer needs them.
+        Read-only to callers."""
+        if self._actor_maps_cache is not None:
+            return self._actor_maps_cache
         name_by_actor: dict[str, str] = {}
         type_by_actor: dict[str, str] = {}
-        with self.actors_db.iterator() as it:
-            for key, raw in it:
-                if not key.startswith(b"!actors!"):
-                    continue
+        with self.actors_db.iterator(prefix=b"!actors!") as it:
+            for _, raw in it:
                 try:
                     a = json.loads(raw)
                 except Exception:
@@ -1078,7 +1091,8 @@ class FullExporter:
                 if isinstance(a, dict) and a.get("_id"):
                     name_by_actor[a["_id"]] = a.get("name", "Unknown")
                     type_by_actor[a["_id"]] = a.get("type", "")
-        return name_by_actor, type_by_actor
+        self._actor_maps_cache = (name_by_actor, type_by_actor)
+        return self._actor_maps_cache
 
     def _load_raw_messages(self) -> list:
         """
@@ -1479,43 +1493,64 @@ class FullExporter:
 
     # ── LevelDB helpers ───────────────────────────────────────────────────
 
-    def _get_actor_items(self, actor_id: str) -> list:
-        prefix = f"!actors.items!{actor_id}.".encode()
-        items  = []
-        with self.actors_db.iterator() as it:
+    def _items_by_actor(self) -> dict:
+        """
+        actor id → list of its item documents, built from one pass over the
+        items keyspace (keys are '!actors.items!<actor_id>.<item_id>') using
+        plyvel's native prefix iteration. Cached — _get_actor_items used to
+        full-scan the entire actors DB per actor, turning get_all_npcs()
+        into hundreds of thousands of key decodes. Read-only to callers.
+        """
+        if self._items_by_actor_cache is not None:
+            return self._items_by_actor_cache
+
+        prefix = b"!actors.items!"
+        by_actor: dict[str, list] = {}
+        with self.actors_db.iterator(prefix=prefix) as it:
             for key, value in it:
-                if key.startswith(prefix):
-                    try:
-                        item = json.loads(value)
-                        if isinstance(item, dict):
-                            items.append(item)
-                    except Exception as e:
-                        print(f"  ⚠  Failed to parse item {key!r}: {e}")
-        return items
+                actor_id = key[len(prefix):].decode("utf-8", "replace").split(".", 1)[0]
+                try:
+                    item = json.loads(value)
+                    if isinstance(item, dict):
+                        by_actor.setdefault(actor_id, []).append(item)
+                except Exception as e:
+                    print(f"  ⚠  Failed to parse item {key!r}: {e}")
+        self._items_by_actor_cache = by_actor
+        return by_actor
+
+    def _get_actor_items(self, actor_id: str) -> list:
+        return self._items_by_actor().get(actor_id, [])
+
+    def _iter_actor_docs(self):
+        """Yield parsed actor documents from the actors keyspace only
+        ('!actors!<id>'), skipping embedded item docs entirely."""
+        with self.actors_db.iterator(prefix=b"!actors!") as it:
+            for _, value in it:
+                try:
+                    actor = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(actor, dict):
+                    yield actor
 
     def get_all_characters(self) -> list:
-        chars = []
-        with self.actors_db.iterator() as it:
-            for _, value in it:
-                try:
-                    actor = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if isinstance(actor, dict) and actor.get("type") == "character":
-                    chars.append(self._parse_character(actor))
-        return chars
+        """Parsed PC records, cached after first call — several push paths
+        (PC push, session export, party overview) each need the full list.
+        Read-only to callers."""
+        if self._characters_cache is None:
+            self._characters_cache = [self._parse_character(a)
+                                      for a in self._iter_actor_docs()
+                                      if a.get("type") == "character"]
+        return self._characters_cache
 
     def get_all_npcs(self) -> list:
-        npcs = []
-        with self.actors_db.iterator() as it:
-            for _, value in it:
-                try:
-                    actor = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if isinstance(actor, dict) and actor.get("type") == "npc":
-                    npcs.append(self._parse_npc(actor))
-        return npcs
+        """Parsed NPC records, cached after first call (see
+        get_all_characters). Read-only to callers."""
+        if self._npcs_cache is None:
+            self._npcs_cache = [self._parse_npc(a)
+                                for a in self._iter_actor_docs()
+                                if a.get("type") == "npc"]
+        return self._npcs_cache
 
     def get_party_actors(self) -> list:
         """
@@ -1524,93 +1559,84 @@ class FullExporter:
         ({id, name, items}) so callers can treat them the same way for
         inventory-diffing purposes.
         """
+        if self._parties_cache is not None:
+            return self._parties_cache
         parties = []
-        with self.actors_db.iterator() as it:
-            for _, value in it:
-                try:
-                    actor = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if isinstance(actor, dict) and actor.get("type") == "party":
-                    actor_id = actor.get("_id")
-                    raw_items = self._get_actor_items(actor_id)
-                    items = [enrich_item(i, self.compendium) for i in raw_items]
-                    parties.append({"id": actor_id, "name": actor.get("name", "Party Stash"), "items": items})
+        for actor in self._iter_actor_docs():
+            if actor.get("type") == "party":
+                actor_id = actor.get("_id")
+                raw_items = self._get_actor_items(actor_id)
+                items = [enrich_item(i, self.compendium) for i in raw_items]
+                parties.append({"id": actor_id, "name": actor.get("name", "Party Stash"), "items": items})
+        self._parties_cache = parties
         return parties
 
     def debug_dump(self, name: str):
         """Dump raw system fields for a named actor, including full item data."""
-        with self.actors_db.iterator() as it:
-            for _, value in it:
-                try:
-                    actor = json.loads(value)
-                except Exception:
-                    continue
-                if not isinstance(actor, dict):
-                    continue
-                if actor.get("type") not in ("character", "npc"):
-                    continue
-                if actor.get("name", "").lower() != name.lower():
-                    continue
+        for actor in self._iter_actor_docs():
+            if actor.get("type") not in ("character", "npc"):
+                continue
+            if actor.get("name", "").lower() != name.lower():
+                continue
 
-                system = actor.get("system", {})
-                keys_to_dump = [
-                    "abilities", "saves", "skills",
-                    ("attributes", "ac"),
-                    ("attributes", "perception"),
-                    ("attributes", "hp"),
-                    ("attributes", "speed"),
-                    "proficiencies",
-                    "currency",
-                    ("build", "attributes"),
-                ]
-                print(f"\n{'='*60}")
-                print(f"DEBUG DUMP: {actor.get('name')} (type={actor.get('type')})")
-                print('='*60)
-                for key in keys_to_dump:
-                    if isinstance(key, tuple):
-                        val = system
-                        label = ".".join(key)
-                        for k in key:
-                            val = val.get(k, {}) if isinstance(val, dict) else {}
-                    else:
-                        val = system.get(key, {})
-                        label = key
-                    print(f"\nsystem.{label}:")
-                    print(json.dumps(val, indent=2, default=str)[:2000])
+            system = actor.get("system", {})
+            keys_to_dump = [
+                "abilities", "saves", "skills",
+                ("attributes", "ac"),
+                ("attributes", "perception"),
+                ("attributes", "hp"),
+                ("attributes", "speed"),
+                "proficiencies",
+                "currency",
+                ("build", "attributes"),
+            ]
+            print(f"\n{'='*60}")
+            print(f"DEBUG DUMP: {actor.get('name')} (type={actor.get('type')})")
+            print('='*60)
+            for key in keys_to_dump:
+                if isinstance(key, tuple):
+                    val = system
+                    label = ".".join(key)
+                    for k in key:
+                        val = val.get(k, {}) if isinstance(val, dict) else {}
+                else:
+                    val = system.get(key, {})
+                    label = key
+                print(f"\nsystem.{label}:")
+                print(json.dumps(val, indent=2, default=str)[:2000])
 
-                items = self._get_actor_items(actor.get("_id", ""))
-                print(f"\nTotal items: {len(items)}")
+            items = self._get_actor_items(actor.get("_id", ""))
+            print(f"\nTotal items: {len(items)}")
 
-                for itype in ("class", "ancestry", "background", "heritage"):
-                    found = [i for i in items if i.get("type") == itype]
-                    for item in found:
-                        isys = item.get("system") or {}
-                        print(f"\n── {itype.upper()} item: {item.get('name','?')} ──")
-                        for field in ("boosts","flaws","keyAbility","savingThrows",
-                                      "defenses","perception","trainedSkills",
-                                      "trainedLore","hp","rules"):
-                            fval = isys.get(field)
-                            if fval is not None:
-                                dumped = json.dumps(fval, indent=2, default=str)
-                                if field == "rules" and len(dumped) > 1500:
-                                    dumped = dumped[:1500] + "\n  … (truncated)"
-                                print(f"  .{field}: {dumped}")
+            for itype in ("class", "ancestry", "background", "heritage"):
+                found = [i for i in items if i.get("type") == itype]
+                for item in found:
+                    isys = item.get("system") or {}
+                    print(f"\n── {itype.upper()} item: {item.get('name','?')} ──")
+                    for field in ("boosts","flaws","keyAbility","savingThrows",
+                                  "defenses","perception","trainedSkills",
+                                  "trainedLore","hp","rules"):
+                        fval = isys.get(field)
+                        if fval is not None:
+                            dumped = json.dumps(fval, indent=2, default=str)
+                            if field == "rules" and len(dumped) > 1500:
+                                dumped = dumped[:1500] + "\n  … (truncated)"
+                            print(f"  .{field}: {dumped}")
 
-                treasure_items = [i for i in items if i.get("type") == "treasure"]
-                if treasure_items:
-                    print(f"\n── TREASURE items ({len(treasure_items)}) ──")
-                    for item in treasure_items[:12]:
-                        isys = item.get("system") or {}
-                        print(f"  {item.get('name','?')!r}")
-                        for field in ("quantity", "denomination", "stackGroup",
-                                      "price", "value", "weight", "bulk"):
-                            fval = isys.get(field)
-                            if fval is not None:
-                                print(f"    .{field}: {json.dumps(fval, default=str)}")
-                    if len(treasure_items) > 12:
-                        print(f"  … and {len(treasure_items)-12} more")
-                return
+            treasure_items = [i for i in items if i.get("type") == "treasure"]
+            if treasure_items:
+                print(f"\n── TREASURE items ({len(treasure_items)}) ──")
+                for item in treasure_items[:12]:
+                    isys = item.get("system") or {}
+                    print(f"  {item.get('name','?')!r}")
+                    for field in ("quantity", "denomination", "stackGroup",
+                                  "price", "value", "weight", "bulk"):
+                        fval = isys.get(field)
+                        if fval is not None:
+                            print(f"    .{field}: {json.dumps(fval, default=str)}")
+                if len(treasure_items) > 12:
+                    print(f"  … and {len(treasure_items)-12} more")
+            return
 
         print(f"✗  Actor '{name}' not found.")
 
