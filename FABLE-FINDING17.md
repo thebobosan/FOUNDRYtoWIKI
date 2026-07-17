@@ -137,7 +137,14 @@ data; consider including rows for any PC with recorded own-turns.
 
 ## Efficiency
 
-### 12. `_get_actor_items` full-scans the actors DB once per actor, and actor lists are re-parsed per consumer
+### 12. `_get_actor_items` full-scans the actors DB once per actor, and actor lists are re-parsed per consumer — **FIXED 2026-07-17**
+
+> **Status:** fixed. Items are now bucketed by actor in one prefix-iterated
+> pass (`_items_by_actor`, cached); `get_all_characters`/`get_all_npcs`/
+> `get_party_actors`/`_actor_maps` cache their parsed results, and all actor
+> scans use plyvel prefix iteration. Cold `get_all_npcs()` 1.7s → 0.30s,
+> repeat calls ~2µs. Verified all 214 rendered pages (15 PC + 198 NPC +
+> campaign stats) byte-identical to the old code, and `test_export.py` passes.
 full-export.py:1457-1469. Every call iterates the entire actors LevelDB (~3,900 keys
 in the fixture) and filters by prefix in Python. `get_all_npcs()` (198 NPCs) is
 therefore ~770k key decodes — and a `--push --npcs --session --overview` run calls
