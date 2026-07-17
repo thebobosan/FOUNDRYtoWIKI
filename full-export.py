@@ -4381,7 +4381,8 @@ class SessionExporter:
         pc_encounters: dict[str, set] = {}
 
         def _rec(actor_id: str) -> dict:
-            return pc_stats.setdefault(actor_id, {"dealt": 0, "taken": 0, "own_turns": set()})
+            return pc_stats.setdefault(actor_id, {"dealt": 0, "taken": 0,
+                                                  "healed": 0, "own_turns": set()})
 
         for roll in rolls:
             if roll["actor_id"] not in char_by_id:
@@ -4423,10 +4424,9 @@ class SessionExporter:
                 if actor_id in char_by_id:
                     _rec(actor_id)["own_turns"].add((widx, round_n, turn_n))
 
-            # Damage dealt/taken (non-healing only).
+            # Damage dealt/taken, and healing given.
             applied = pf.get("appliedDamage")
-            if (isinstance(applied, dict) and not applied.get("isHealing")
-                    and not applied.get("isReverted")):
+            if isinstance(applied, dict) and not applied.get("isReverted"):
                 amount = fe._applied_hp_amount(m)
                 if amount > 0:
                     victim_id = fe._uuid_to_actor_id(applied.get("uuid", ""))
@@ -4434,24 +4434,33 @@ class SessionExporter:
                         victim_id = (m.get("speaker") or {}).get("actor", "")
                     origin = pf.get("origin") or {}
                     atk_id = fe._uuid_to_actor_id(origin.get("actor", "") if isinstance(origin, dict) else "")
-                    if victim_id in char_by_id:
-                        _rec(victim_id)["taken"] += amount
-                    if atk_id and atk_id in char_by_id and atk_id != victim_id:
-                        _rec(atk_id)["dealt"] += amount
+                    if applied.get("isHealing"):
+                        # Same semantics as campaign_stats: only button-applied
+                        # healing with an origin actor counts, and self-healing
+                        # is excluded — "Healing Given" measures support play.
+                        if atk_id and atk_id in char_by_id and atk_id != victim_id:
+                            _rec(atk_id)["healed"] += amount
+                    else:
+                        if victim_id in char_by_id:
+                            _rec(victim_id)["taken"] += amount
+                        if atk_id and atk_id in char_by_id and atk_id != victim_id:
+                            _rec(atk_id)["dealt"] += amount
 
         per_char = {}
         for actor_id in set(pc_stats) | set(pc_encounters):
             name = char_by_id.get(actor_id)
             if not name:
                 continue
-            r        = pc_stats.get(actor_id, {"dealt": 0, "taken": 0, "own_turns": set()})
+            r        = pc_stats.get(actor_id, {"dealt": 0, "taken": 0,
+                                               "healed": 0, "own_turns": set()})
             n_turns  = len(r["own_turns"])
             n_rounds = sum(max_round[widx] for widx in pc_encounters.get(actor_id, ()))
-            if not r["dealt"] and not r["taken"]:
+            if not r["dealt"] and not r["taken"] and not r["healed"]:
                 continue
             per_char[name] = {
                 "total_dealt":         r["dealt"],
                 "total_taken":         r["taken"],
+                "total_healed":        r["healed"],
                 "avg_dealt_per_turn":  (r["dealt"] / n_turns)  if n_turns  else None,
                 "avg_taken_per_round": (r["taken"] / n_rounds) if n_rounds else None,
             }
@@ -4871,7 +4880,8 @@ class SessionExporter:
         per_char = combat_stats.get("per_char") or {}
         if per_char:
             lines.append('{| class="wikitable sortable" style="width:100%;"')
-            lines.append("! Character !! Total Dealt !! Total Taken !! Avg Dealt/Turn !! Avg Taken/Round")
+            lines.append("! Character !! Total Dealt !! Total Taken !! Healing Given "
+                         "!! Avg Dealt/Turn !! Avg Taken/Round")
             for name in sorted(per_char):
                 c = per_char[name]
                 name_esc = wiki_escape(name)
@@ -4880,7 +4890,7 @@ class SessionExporter:
                 lines += [
                     "|-",
                     f"| [[Characters/{name_esc}|{name_esc}]] || {c['total_dealt']} || {c['total_taken']} "
-                    f"|| {dealt_avg} || {taken_avg}",
+                    f"|| {c.get('total_healed', 0)} || {dealt_avg} || {taken_avg}",
                 ]
             lines.append("|}")
         elif not encounters:

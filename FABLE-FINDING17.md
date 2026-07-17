@@ -179,7 +179,14 @@ the only page that cannot be inspected before it goes live. A read-only preview
 (render to `wiki_preview/`, skip snapshot save and index/nav writes) would fit the
 existing pattern.
 
-### 15. Session combat stats lack a "Healing Given" column
+### 15. Session combat stats lack a "Healing Given" column — **FIXED 2026-07-17**
+
+> **Status:** fixed. `_compute_combat_stats` now tracks button-applied,
+> non-self healing per PC (same semantics as `campaign_stats`) and the
+> session table renders a "Healing Given" column; pure healers with no
+> damage dealt/taken now appear in the table too. Verified dealt/taken
+> figures byte-identical to the old code across a whole-history window and
+> per-PC healing totals bounded by the campaign-stats totals.
 The campaign stats page tracks healing given per PC; the per-session table
 (`_compute_combat_stats`) tracks only dealt/taken, though the same
 `_applied_hp_amount` + `isHealing` data is already flowing through that loop.
